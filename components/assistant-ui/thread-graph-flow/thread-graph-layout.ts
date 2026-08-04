@@ -72,11 +72,14 @@ export const layoutThreadGraphFlow = (
     const dagrePosition = graph.node(node.id) as { x: number; y: number } | undefined;
     const storedDraftPosition =
       node.data.kind === "prompt-draft" ? node.data.position ?? null : null;
+    const manualRootPosition =
+      node.data.kind === "root" ? node.data.position ?? null : null;
     return {
       ...node,
       draggable: true,
       position:
         storedDraftPosition ??
+        manualRootPosition ??
         (dagrePosition
           ? {
               x: dagrePosition.x - size.width / 2,

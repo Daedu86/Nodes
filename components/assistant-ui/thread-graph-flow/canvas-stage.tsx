@@ -14,7 +14,6 @@ import {
   type ReactFlowInstance,
   type Viewport,
 } from "@xyflow/react";
-import { Bot, Plus } from "lucide-react";
 import { ArtifactGraphNode } from "@/components/assistant-ui/thread-graph-flow/artifact-node";
 import { CanvasPromptNode } from "@/components/assistant-ui/thread-graph-flow/canvas-prompt-node";
 import { CanvasResponseNode } from "@/components/assistant-ui/thread-graph-flow/canvas-response-node";
@@ -26,7 +25,6 @@ import type {
   ThreadGraphFlowEdge,
   ThreadGraphFlowNode,
 } from "@/components/assistant-ui/thread-graph-flow/thread-graph-flow-types";
-import { useCodexAgentRuns } from "@/components/assistant-ui/thread-graph-flow/use-codex-agent-runs";
 import {
   isFlowViewport,
   type FlowRenderMode,
@@ -152,6 +150,8 @@ const mergeRenderedNodes = (
 
 type CanvasStageProps = {
   activeSessionId: string | null;
+  agentEdges: ThreadGraphFlowEdge[];
+  agentNodes: ThreadGraphFlowNode[];
   edges: ThreadGraphFlowEdge[];
   flowRenderMode: FlowRenderMode;
   graphStructureSignature: string;
@@ -169,6 +169,10 @@ type CanvasStageProps = {
   ) => void;
   onMessageOpen: (messageId: string) => void;
   onFlowRenderModeChange: (mode: FlowRenderMode) => void;
+  onAgentPositionChange: (
+    nodeId: string,
+    position: { x: number; y: number },
+  ) => void;
   onNodeSelect: (nodeId: string | null) => void;
   onViewportChange: (viewport: Viewport) => void;
   selectedNodeId: string | null;
@@ -178,6 +182,8 @@ type CanvasStageProps = {
 
 export function CanvasStage({
   activeSessionId,
+  agentEdges,
+  agentNodes,
   edges,
   flowRenderMode,
   graphStructureSignature,
@@ -190,15 +196,13 @@ export function CanvasStage({
   onInit,
   onMessageOpen,
   onFlowRenderModeChange,
+  onAgentPositionChange,
   onNodeSelect,
   onViewportChange,
   selectedNodeId,
   storedViewport,
   viewportRef,
 }: CanvasStageProps) {
-  const { addAgent, agentEdges, agentNodes, updateAgentPosition } = useCodexAgentRuns({
-    sessionId: activeSessionId,
-  });
   const combinedNodes = React.useMemo(
     () => [...nodes, ...agentNodes],
     [agentNodes, nodes],
@@ -273,7 +277,7 @@ export function CanvasStage({
       persistNodePosition(node.id, position);
 
       if (node.data?.kind === "agent-run") {
-        updateAgentPosition(node.id, position);
+        onAgentPositionChange(node.id, position);
         return;
       }
       if (
@@ -287,7 +291,7 @@ export function CanvasStage({
       onArtifactPositionChange,
       onDraftPositionChange,
       persistNodePosition,
-      updateAgentPosition,
+      onAgentPositionChange,
     ],
   );
 
@@ -342,18 +346,6 @@ export function CanvasStage({
       onDragOver={onCanvasDragOver}
       onDrop={onCanvasDrop}
     >
-      <button
-        type="button"
-        onClick={() => addAgent(null)}
-        className="absolute left-5 top-5 z-20 inline-flex h-10 items-center gap-2 rounded-full border border-sky-300/35 bg-slate-950/92 px-4 text-xs font-semibold text-sky-100 shadow-sm backdrop-blur transition hover:bg-slate-900"
-        aria-label="Add Codex agent to canvas"
-        title="Add an independent Codex agent node. Add several to run multiple agents in parallel."
-      >
-        <Bot className="h-4 w-4" />
-        <Plus className="h-3.5 w-3.5" />
-        Add agent
-      </button>
-
       <div
         role="group"
         aria-label="Canvas render mode"

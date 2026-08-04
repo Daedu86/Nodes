@@ -4,6 +4,7 @@ import { act, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import React from "react";
 import { useCanvasBlockActions } from "@/components/assistant-ui/thread-graph-flow/use-canvas-block-actions";
+import { getCanvasBlockDefinition } from "@/components/assistant-ui/thread-graph-flow/block-library";
 import type { SessionArtifact } from "@/lib/session-artifacts";
 
 const timestamp = "2026-07-11T00:00:00.000Z";
@@ -59,6 +60,7 @@ const createParams = () => {
   const setCanvasSelectionId = vi.fn<(nodeId: string | null) => void>();
   const setFocusedMessageId = vi.fn<(messageId: string | null) => void>();
   const setSelectedNodeId = vi.fn<(nodeId: string | null) => void>();
+  const onCreateConversationRoot = vi.fn<Params["onCreateConversationRoot"]>();
 
   const params = {
     activeSessionId: "session-1",
@@ -99,6 +101,7 @@ const createParams = () => {
     isArtifactLinkedToTarget: vi.fn(() => false),
     linkArtifactToTarget: vi.fn(),
     nodeIndex: new Map([[responseNode.id, responseNode]]),
+    onCreateConversationRoot,
     promptIndex: new Map(),
     reactFlowInstance: null,
     selectedArtifact: artifact,
@@ -118,6 +121,7 @@ const createParams = () => {
     artifact,
     createArtifact,
     params,
+    onCreateConversationRoot,
     setCanvasSelectionId,
     setFocusedMessageId,
     setSelectedNodeId,
@@ -126,6 +130,19 @@ const createParams = () => {
 };
 
 describe("useCanvasBlockActions", () => {
+  it("adds an optional conversation root at the requested position", () => {
+    const fixture = createParams();
+    const getActions = renderActions(fixture.params);
+    const rootBlock = getCanvasBlockDefinition("process-conversation-root");
+    if (!rootBlock) throw new Error("Conversation Root block is missing");
+
+    act(() => {
+      getActions().handleAddCanvasBlock(rootBlock, { x: 12, y: 34 });
+    });
+
+    expect(fixture.onCreateConversationRoot).toHaveBeenCalledWith({ x: 12, y: 34 });
+  });
+
   it("creates an indepent prompt and selects it", () => {
     const fixture = createParams();
     const getActions = renderActions(fixture.params);

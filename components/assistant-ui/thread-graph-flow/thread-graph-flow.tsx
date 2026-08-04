@@ -5,6 +5,12 @@ import { useAssistantRuntime } from "@assistant-ui/react";
 import React from "react";
 import { useThreadRepoItems } from "@/components/assistant-ui/use-thread-repo-items";
 import { buildThreadGraphNodes } from "@/components/assistant-ui/thread-graph/build-graph-nodes";
+import {
+  getManualConversationRootStorageKey,
+  parseManualConversationRoot,
+  resolveCanvasConversationNodes,
+  type ManualConversationRoot,
+} from "@/components/assistant-ui/thread-graph-flow/canvas-conversation-nodes";
 import { buildThreadGraphExportText } from "@/components/assistant-ui/thread-graph/export-graph-json";
 import { getEdgeKey } from "@/components/assistant-ui/thread-graph/graph-geometry";
 import {
@@ -25,7 +31,6 @@ import { useCanvasInspectorViewModel } from "@/components/assistant-ui/thread-gr
 import { CanvasWorkspaceView } from "@/components/assistant-ui/thread-graph-flow/canvas-workspace-view";
 import {
   ROOT_NODE_ID,
-  ROOT_NODE_LABEL,
   type EdgeConnectorInfo,
   type LinkConnectorPref,
   type Node as ThreadGraphNodeModel,
@@ -128,34 +133,45 @@ export function ThreadGraphFlow() {
   const inspectorScrollRef = React.useRef<HTMLDivElement | null>(null);
   const toolbarMenuRef = React.useRef<HTMLDivElement | null>(null);
   const flowViewportRef = React.useRef<HTMLDivElement | null>(null);
+  const [manualRootBySession, setManualRootBySession] = React.useState<
+    Record<string, ManualConversationRoot>
+  >({});
 
+  React.useEffect(() => {
+    if (!activeSessionId) return;
+    let saved: ManualConversationRoot | null = null;
+    try {
+      saved = parseManualConversationRoot(
+        window.localStorage.getItem(
+          getManualConversationRootStorageKey(activeSessionId),
+        ),
+      );
+    } catch {
+      // Storage can be unavailable in restricted browsing contexts.
+    }
+    if (!saved) return;
+    setManualRootBySession((current) => ({
+      ...current,
+      [activeSessionId]: saved,
+    }));
+  }, [activeSessionId]);
 
   const nodes = React.useMemo(
     () => buildThreadGraphNodes({ repoItems, bridgeNodeIds, getParentId }),
     [repoItems, bridgeNodeIds, getParentId],
   );
-  const canvasConversationNodes = React.useMemo<ThreadGraphNodeModel[]>(() => {
-    if (nodes.length > 0) {
-      return nodes.map((node) => ({
-        ...node,
-        contextScope: nodeContextScopes[node.id] ?? node.contextScope ?? null,
-      }));
-    }
-    return [
-      {
-        id: ROOT_NODE_ID,
-        parentId: null,
-        role: "ROOT",
-        text: ROOT_NODE_LABEL,
-        depth: 0,
-        idx: -1,
-        branchId: null,
-        isBridge: false,
-        model: null,
-        provider: null,
-      },
-    ];
-  }, [nodeContextScopes, nodes]);
+  const manualRoot = activeSessionId
+    ? manualRootBySession[activeSessionId] ?? null
+    : null;
+  const canvasConversationNodes = React.useMemo<ThreadGraphNodeModel[]>(
+    () =>
+      resolveCanvasConversationNodes({
+        contextScopes: nodeContextScopes,
+        manualRoot,
+        nodes,
+      }),
+    [manualRoot, nodeContextScopes, nodes],
+  );
   const nodeIndex = React.useMemo(
     () => new Map(canvasConversationNodes.map((node) => [node.id, node] as const)),
     [canvasConversationNodes],
@@ -573,6 +589,43 @@ export function ThreadGraphFlow() {
     ],
   );
 
+  const handleCreateConversationRoot = React.useCallback(
+    (position: { x: number; y: number } | null) => {
+      if (!activeSessionId) return;
+      if (nodeIndex.has(ROOT_NODE_ID)) {
+        applyCanvasSelection(ROOT_NODE_ID);
+        return;
+      }
+
+      const manualRootState = { position } satisfies ManualConversationRoot;
+      setManualRootBySession((current) => ({
+        ...current,
+        [activeSessionId]: manualRootState,
+      }));
+      try {
+        window.localStorage.setItem(
+          getManualConversationRootStorageKey(activeSessionId),
+          JSON.stringify(manualRootState),
+        );
+      } catch {
+        // The root remains available for this session while the page is open.
+      }
+      setFlowRenderMode("2d");
+      setSelectedNodeId(ROOT_NODE_ID);
+      setCanvasSelectionId(ROOT_NODE_ID);
+      setFocusedMessageId(null);
+    },
+    [
+      activeSessionId,
+      applyCanvasSelection,
+      nodeIndex,
+      setCanvasSelectionId,
+      setFlowRenderMode,
+      setFocusedMessageId,
+      setSelectedNodeId,
+    ],
+  );
+
   const {
     handleAddCanvasBlock,
     handleArtifactConnectFromInspector,
@@ -599,6 +652,7 @@ export function ThreadGraphFlow() {
     isArtifactLinkedToTarget,
     linkArtifactToTarget,
     nodeIndex,
+    onCreateConversationRoot: handleCreateConversationRoot,
     promptIndex,
     reactFlowInstance,
     selectedArtifact,

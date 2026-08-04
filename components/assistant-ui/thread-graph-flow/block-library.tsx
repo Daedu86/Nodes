@@ -1,17 +1,26 @@
 "use client";
 
 import {
+  Bot,
   Braces,
   FileText,
+  GitBranch,
   ImageIcon,
   ListChecks,
   MessageSquareText,
+  Plus,
   Scale,
   Table2,
   TextCursorInput,
   Upload,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type {
   SessionArtifactSemanticType,
   SessionArtifactType,
@@ -26,12 +35,21 @@ export type CanvasBlockDefinition = {
   description: string;
   artifactType?: SessionArtifactType;
   semanticType?: SessionArtifactSemanticType | null;
-  action: "prompt" | "artifact" | "upload-file" | "upload-image";
+  action: "root" | "prompt" | "artifact" | "upload-file" | "upload-image";
   accent: string;
   icon: LucideIcon;
 };
 
 export const INITIAL_CANVAS_BLOCKS: CanvasBlockDefinition[] = [
+  {
+    id: "process-conversation-root",
+    category: "process",
+    title: "Conversation Root",
+    description: "Optional starting point for a conversation tree.",
+    action: "root",
+    accent: "#0284c7",
+    icon: GitBranch,
+  },
   {
     id: "process-prompt",
     category: "process",
@@ -142,9 +160,11 @@ export function getCanvasBlockDefinition(id: string) {
 }
 
 export function CanvasBlockLibrary({
+  onAddAgent,
   onAddBlock,
 }: {
   collapsed: boolean;
+  onAddAgent: () => void;
   onAddBlock: (block: CanvasBlockDefinition) => void;
   onCollapsedChange: (collapsed: boolean) => void;
 }) {
@@ -155,6 +175,28 @@ export function CanvasBlockLibrary({
       className="relative z-30 flex h-full w-14 shrink-0 flex-col border-r border-border/60 bg-transparent"
     >
       <div className="flex flex-1 flex-col items-center gap-2 overflow-y-auto py-3">
+        <TooltipProvider delayDuration={120}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                title="Add a Codex agent to run an independent task on the canvas."
+                aria-label="Add Codex agent to canvas"
+                className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-sky-500/30 bg-sky-500/10 text-sky-700 transition hover:bg-sky-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-sky-200"
+                onClick={onAddAgent}
+              >
+                <Bot className="h-4 w-4" />
+                <Plus className="absolute bottom-1.5 right-1.5 h-2.5 w-2.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={8}>
+              Add a Codex agent to run an independent task.
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
+        <div className="h-px w-8 shrink-0 bg-border/60" aria-hidden="true" />
+
         {INITIAL_CANVAS_BLOCKS.map((block) => {
           const Icon = block.icon;
           const helpText = `${categoryLabels[block.category]}: ${block.title} — ${block.description} Click to add or drag onto the canvas.`;

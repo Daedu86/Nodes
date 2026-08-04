@@ -53,6 +53,7 @@ type UseCanvasBlockActionsParams = {
   isArtifactLinkedToTarget: SessionArtifactsApi["isArtifactLinkedToTarget"];
   linkArtifactToTarget: SessionArtifactsApi["linkArtifactToTarget"];
   nodeIndex: ReadonlyMap<string, ThreadGraphNodeModel>;
+  onCreateConversationRoot: (position: { x: number; y: number } | null) => void;
   promptIndex: ReadonlyMap<string, SessionArtifact>;
   reactFlowInstance: ReactFlowInstance<ThreadGraphFlowNode, ThreadGraphFlowEdge> | null;
   selectedArtifact: SessionArtifact | null;
@@ -84,6 +85,7 @@ export function useCanvasBlockActions({
   isArtifactLinkedToTarget,
   linkArtifactToTarget,
   nodeIndex,
+  onCreateConversationRoot,
   promptIndex,
   reactFlowInstance,
   selectedArtifact,
@@ -329,6 +331,10 @@ export function useCanvasBlockActions({
       const resolvedPosition = position ?? getCanvasCenterPosition();
       setFlowRenderMode("2d");
       setConnectionError(null);
+      if (block.action === "root") {
+        onCreateConversationRoot(resolvedPosition);
+        return;
+      }
       if (block.action === "prompt") {
         handleCreatePromptNode(resolvedPosition);
         return;
@@ -364,6 +370,7 @@ export function useCanvasBlockActions({
       handleCreateArtifact,
       handleCreatePromptNode,
       imageUploadInputRef,
+      onCreateConversationRoot,
       setConnectionError,
       setFlowRenderMode,
     ],

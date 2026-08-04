@@ -6,10 +6,14 @@ import { CanvasArtifactInspector } from "@/components/assistant-ui/thread-graph-
 import { CanvasMessageInspector } from "@/components/assistant-ui/thread-graph-flow/canvas-message-inspector";
 import { CanvasSidebar } from "@/components/assistant-ui/thread-graph-flow/canvas-sidebar";
 import { CanvasStage } from "@/components/assistant-ui/thread-graph-flow/canvas-stage";
+import { useCodexAgentRuns } from "@/components/assistant-ui/thread-graph-flow/use-codex-agent-runs";
 
 type CanvasWorkspaceViewProps = {
   artifactInspectorProps: React.ComponentProps<typeof CanvasArtifactInspector> | null;
-  blockLibraryProps: React.ComponentProps<typeof CanvasBlockLibrary>;
+  blockLibraryProps: Omit<
+    React.ComponentProps<typeof CanvasBlockLibrary>,
+    "onAddAgent"
+  >;
   fileUploadInputRef: React.RefObject<HTMLInputElement | null>;
   imageUploadInputRef: React.RefObject<HTMLInputElement | null>;
   inspectorScrollRef: React.RefObject<HTMLDivElement | null>;
@@ -17,7 +21,10 @@ type CanvasWorkspaceViewProps = {
   onFileUploadChange: React.ChangeEventHandler<HTMLInputElement>;
   onImageUploadChange: React.ChangeEventHandler<HTMLInputElement>;
   sidebarProps: Omit<React.ComponentProps<typeof CanvasSidebar>, "children">;
-  stageProps: React.ComponentProps<typeof CanvasStage>;
+  stageProps: Omit<
+    React.ComponentProps<typeof CanvasStage>,
+    "agentEdges" | "agentNodes" | "onAgentPositionChange"
+  >;
 };
 
 export function CanvasWorkspaceView({
@@ -29,6 +36,12 @@ export function CanvasWorkspaceView({
   stageProps,
 }: CanvasWorkspaceViewProps) {
   const { onCollapsedChange } = blockLibraryProps;
+  const { addAgent, agentEdges, agentNodes, updateAgentPosition } =
+    useCodexAgentRuns({ sessionId: stageProps.activeSessionId });
+  const handleAddAgent = React.useCallback(
+    () => addAgent(null),
+    [addAgent],
+  );
 
   React.useLayoutEffect(() => {
     onCollapsedChange(true);
@@ -52,8 +65,16 @@ export function CanvasWorkspaceView({
       />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1 gap-3 p-3">
-          <CanvasBlockLibrary {...blockLibraryProps} />
-          <CanvasStage {...stageProps} />
+          <CanvasBlockLibrary
+            {...blockLibraryProps}
+            onAddAgent={handleAddAgent}
+          />
+          <CanvasStage
+            {...stageProps}
+            agentEdges={agentEdges}
+            agentNodes={agentNodes}
+            onAgentPositionChange={updateAgentPosition}
+          />
         </div>
       </div>
     </section>

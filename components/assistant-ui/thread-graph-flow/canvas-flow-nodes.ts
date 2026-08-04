@@ -64,7 +64,10 @@ export function buildConversationFlowNodes({
     return {
       id: node.id,
       type: "threadNode",
-      position: { x: 0, y: 0 },
+      position:
+        typeof node.x === "number" && typeof node.y === "number"
+          ? { x: node.x, y: node.y }
+          : { x: 0, y: 0 },
       selectable: true,
       draggable: true,
       data: {
@@ -86,7 +89,10 @@ export function buildConversationFlowNodes({
         linkedArtifactCount: linkedArtifactCountByTarget.get(node.id) ?? 0,
         model: node.model ?? null,
         modelLabel: visual.modelLabel,
-        position: null,
+        position:
+          typeof node.x === "number" && typeof node.y === "number"
+            ? { x: node.x, y: node.y }
+            : null,
         preview: node.text,
         provider: node.provider ?? null,
         providerLabel: visual.providerLabel,
