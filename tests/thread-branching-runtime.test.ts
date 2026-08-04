@@ -70,7 +70,7 @@ describe("thread branching runtime", () => {
     });
   });
 
-  it("uses the internal runtime append for root branches and starts the run explicitly", () => {
+  it("uses the internal runtime append as one atomic root branch transaction", () => {
     const internalAppend = vi.fn();
     const publicAppend = vi.fn();
     const startRun = vi.fn();
@@ -111,7 +111,7 @@ describe("thread branching runtime", () => {
     });
   });
 
-  it("uses public append then explicit startRun for non-root full-tree runs", () => {
+  it("uses public append as one atomic non-root full-tree transaction", () => {
     const internalAppend = vi.fn();
     const publicAppend = vi.fn();
     const startRun = vi.fn();
@@ -174,7 +174,7 @@ describe("thread branching runtime", () => {
     });
   });
 
-  it("falls back to public append for root branches and still explicitly starts once", () => {
+  it("falls back to public append while keeping the root run atomic", () => {
     const publicAppend = vi.fn();
     const startRun = vi.fn();
     const runtime = {
