@@ -492,7 +492,9 @@ async function createBranchFromFlow(
   await expect(sendButton).toBeEnabled();
 
   const responsePromise = page.waitForResponse(
-    (response) => response.url().includes("/api/chat") && response.request().method() === "POST",
+    (response) =>
+      response.url().includes("/api/canvas-branch-runs") &&
+      response.request().method() === "POST",
   );
   void submitActionName;
   void options;
@@ -720,10 +722,7 @@ test("loads the workspace without getting stuck on session bootstrap", async ({ 
 test("sends a prompt and renders the mocked assistant reply", async ({ page }) => {
   await gotoChat(page);
   const reply = await sendPrompt(page, "Browser smoke prompt");
-  const assistantMessage = page.locator("[data-message-id]").filter({
-    has: page.getByText(reply, { exact: true }),
-  }).first();
-  await expect(assistantMessage.getByText(/Latency:/)).toBeVisible();
+  await expect(threadMessage(page, reply)).toBeVisible();
 });
 
 test("copies graph JSON after a reply", async ({ page }) => {

@@ -1,58 +1,214 @@
-name: Prepare compatible runtime lockfile
+name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
-  group: runtime-lock-bootstrap-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CI: "true"
+  NEXT_TELEMETRY_DISABLED: "1"
+  VERCEL_ENV: preview
+  NODES_PERSISTENCE_BACKEND: file
+  AUTH_ENABLE_DEV_CREDENTIALS: "0"
+  OPENROUTER_ALLOW_DEPLOYMENT_KEY: "0"
+  OPENROUTER_REQUIRE_USER_KEY: "1"
+
 jobs:
-  refresh-lockfile:
-    name: Refresh and verify compatible runtime lockfile
-    if: github.head_ref == 'maintenance/runtime-lock-bootstrap'
+  quality:
+    name: Quality
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout bootstrap branch
+      - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
           cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --fund=false
+      - name: Lint
+        run: npm run format:check
+      - name: Application type check
+        run: npm run typecheck
+      - name: End-to-end type check
+        run: npm run typecheck:e2e
+      - name: Verify end-to-end test discovery
+        run: npm run test:e2e -- --list
 
-      - name: Prepare compatible runtime inputs
-        run: node scripts/prepare-runtime-lock.mjs
+  unit:
+    name: Unit and coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --fund=false
+      - name: Unit tests with repository coverage
+        run: npm run test:coverage
+      - name: Critical-module coverage
+        run: npm run test:critical-coverage
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-reports
+          path: coverage
+          if-no-files-found: ignore
+          retention-days: 7
 
-      - name: Regenerate package lock
-        run: npm install --package-lock-only --ignore-scripts --no-audit --fund=false
+  build:
+    name: Production build and bundle budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --fund=false
+      - name: Build preview configuration and enforce JavaScript budget
+        run: npm run build:budget
 
-      - name: Verify lockfile reproducibility
-        run: npm ci --ignore-scripts --no-audit --fund=false
+  accessibility:
+    name: Accessibility E2E (${{ matrix.browser }})
+    needs: [quality, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+    env:
+      PLAYWRIGHT_BROWSER_NAME: ${{ matrix.browser }}
+      PLAYWRIGHT_RUN_ID: accessibility-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.browser }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --fund=false
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Run accessibility E2E
+        run: npm run test:a11y:e2e -- --workers=1
+      - name: Upload accessibility failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: accessibility-${{ matrix.browser }}-artifacts
+          path: |
+            test-results
+            playwright-report
+          if-no-files-found: ignore
+          retention-days: 7
 
-      - name: Create final integration branch
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          git fetch origin maintenance/dependency-consolidation
-          git checkout -b maintenance/final-dependency-integration
-          git show origin/maintenance/dependency-consolidation:.github/workflows/ci.yml > .github/workflows/ci.yml
-          git show origin/maintenance/dependency-consolidation:.github/workflows/codeql.yml > .github/workflows/codeql.yml
-          rm .github/runtime-lock-bootstrap.pending scripts/prepare-runtime-lock.mjs
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json tests/e2e/smoke.spec.ts .github/workflows/ci.yml .github/workflows/codeql.yml .github/runtime-lock-bootstrap.pending scripts/prepare-runtime-lock.mjs
-          git commit -m "fix: preserve compatible conversation runtime"
-          git push --force-with-lease origin HEAD:maintenance/final-dependency-integration
-          gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment "Compatible lockfile generated and verified. Final branch: maintenance/final-dependency-integration."
+  canvas-performance:
+    name: Canvas performance budget
+    needs: [quality]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CANVAS_FLOW_MAX_MEDIAN_MS: "10000"
+      CANVAS_FLOW_MAX_SCALE_RATIO: "30"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --fund=false
+      - name: Check budget and run Canvas benchmark
+        run: npm run benchmark:canvas:ci
+      - name: Upload Canvas benchmark report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: canvas-benchmark
+          path: test-results/canvas-benchmark.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  security:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --fund=false
+      - name: Reject high or critical production vulnerabilities
+        run: npm run audit:production
+      - name: Reject critical vulnerabilities anywhere in the lockfile
+        run: npm run audit:all
+
+  e2e:
+    name: End-to-end (shard ${{ matrix.shard }}/4)
+    needs: [quality, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      PLAYWRIGHT_RUN_ID: ci-${{ github.run_id }}-${{ github.run_attempt }}-shard-${{ matrix.shard }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --fund=false
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        run: npm run test:e2e -- --workers=1 --shard=${{ matrix.shard }}/4
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-artifacts-${{ matrix.shard }}-of-4
+          path: |
+            test-results
+            playwright-report
+          if-no-files-found: ignore
+          retention-days: 7
