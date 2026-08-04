@@ -1,0 +1,57 @@
+name: Apply Canvas error typing fix
+
+on:
+  push:
+    branches: [maintenance/dependency-consolidation]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: canvas-error-typing-fix
+  cancel-in-progress: true
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout integration branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: maintenance/dependency-consolidation
+
+      - name: Narrow structured error safely
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('components/assistant-ui/thread-graph-flow/use-canvas-branch-submission.ts')
+          source = path.read_text()
+          old = '''          const structuredError =
+            payload?.error && typeof payload.error === "object"
+              ? payload.error.message
+              : payload?.error;
+'''
+          new = '''          const structuredError =
+            typeof payload?.error === "object" && payload.error !== null
+              ? payload.error.message
+              : typeof payload?.error === "string"
+                ? payload.error
+                : undefined;
+'''
+          if old not in source:
+              raise SystemExit('Expected Canvas error block was not found')
+          path.write_text(source.replace(old, new, 1))
+          PY
+
+      - name: Remove one-shot workflow and push fix
+        run: |
+          set -euo pipefail
+          rm .github/workflows/fix-canvas-error-narrowing.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add components/assistant-ui/thread-graph-flow/use-canvas-branch-submission.ts .github/workflows/fix-canvas-error-narrowing.yml
+          git commit -m "fix: narrow Canvas branch run errors"
+          git push origin HEAD:maintenance/dependency-consolidation
