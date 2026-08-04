@@ -1,0 +1,41 @@
+# Example OpenShell policy for the Docker image in ../Dockerfile and a NOOA
+# worker using the OpenAI API. Copy this outside the repository, review it,
+# and adjust both binary paths and permitted endpoints for your own image.
+
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only:
+    - /usr
+    - /usr/local
+    - /lib
+    - /lib64
+    - /etc
+    - /app
+    - /var/log
+    - /proc/self
+    - /dev/urandom
+  read_write:
+    - /sandbox
+    - /workspace
+    - /tmp
+    - /dev/null
+
+landlock:
+  compatibility: best_effort
+
+# The model credential itself belongs in an OpenShell provider. This policy
+# grants the worker process only the egress required to call that provider.
+network_policies:
+  openai_api:
+    name: OpenAI API
+    endpoints:
+      - host: api.openai.com
+        port: 443
+        protocol: rest
+        tls: terminate
+        enforcement: enforce
+        access: full
+    binaries:
+      - path: /usr/local/bin/python

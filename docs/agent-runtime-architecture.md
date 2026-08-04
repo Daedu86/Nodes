@@ -4,10 +4,10 @@ Nodes is evolving from a Canvas that visualizes one local Codex runner into a
 provider-neutral agent workspace. This document defines the stable boundaries
 for that evolution across Nodes, NVIDIA OO Agents (NOOA), and OpenShell.
 
-The first implementation lives in `lib/agents/runtime/`. It adds the shared
-node compiler, event envelope, bounded in-process event bus, and a Codex event
-adapter. It does not change the existing Codex UI or claim that a NOOA runtime
-is already available in production.
+The shared contracts live in `lib/agents/runtime/`. The local NOOA integration
+now lives at `services/nooa-runner/`: it starts an ephemeral OpenShell sandbox,
+runs a NOOA worker inside it, and exposes a private HTTP/SSE bridge to Nodes.
+It does not yet change the existing Codex Canvas UI into a runtime picker.
 
 ## Roles and trust boundaries
 
@@ -57,7 +57,7 @@ The initial catalog contains two entries:
 | Runtime | Status | Current integration point |
 | --- | --- | --- |
 | Codex | Enabled | Existing `services/codex-runner`; a common-envelope adapter is ready for its Canvas events. |
-| NOOA | Planned | A future runtime gateway service launches NOOA inside an OpenShell sandbox and maps NOOA lifecycle/trace events. |
+| NOOA | Enabled locally | `services/nooa-runner` resolves trusted policy/workspace ids, launches NOOA in an ephemeral OpenShell sandbox, and streams normalized events. |
 
 ## Event contract
 
@@ -85,8 +85,8 @@ existing durable event persistence before a run is treated as recoverable.
 
 Provider details remain in `payload`. For example, the first Codex adapter
 preserves the existing `method` and `params` fields while translating its event
-type into the canonical vocabulary. A NOOA adapter will translate method,
-LLM-call, Python-execution, trace, and sandbox-policy events without requiring
+type into the canonical vocabulary. The local NOOA runner maps task, LLM,
+tool, Python-output, trace, and terminal worker messages without requiring
 Canvas to understand NOOA-specific class names.
 
 ## Runtime API target
@@ -98,17 +98,27 @@ The TypeScript contract defines a small control-plane interface:
   provider-specific but consistently authorized by Nodes.
 - Runners emit canonical events through the shared bus and an SSE transport.
 
-The HTTP surface will be added only when the NOOA gateway exists. Existing
-`/api/agents/codex/*` routes remain compatible during that migration. This
-avoids a generic endpoint that accepts an arbitrary `cwd`, raw policy, or an
-unimplemented runtime selector.
+The implemented NOOA bridge is intentionally narrow:
+
+- Nodes exposes `/api/agents/nooa/runs`, run-event SSE, and cancellation.
+- The local runner exposes `/v1/runs`, event SSE, cancellation, health, and
+  readiness checks on a loopback/private endpoint.
+- Requests carry only a compiled node, `workspaceId`, and `policyId`.
+- The runner resolves the workspace path, policy YAML, sandbox image,
+  OpenShell providers, and model configuration from runner-owned environment
+  variables.
+
+The workspace is uploaded as a sandbox snapshot. This phase never copies a
+sandbox edit back to the host automatically; a future review/apply flow will
+make write-back an explicit human action.
 
 ## Incremental delivery
 
-1. **Runtime foundation (this change):** contracts, compiler, event bus, Codex
+1. **Runtime foundation:** contracts, compiler, event bus, Codex
    event adapter, and unit tests.
-2. **NOOA gateway:** a private service with a trusted runtime configuration;
-   it starts NOOA inside a named OpenShell policy and exports canonical events.
+2. **NOOA gateway (this change):** a private service with trusted runtime
+   configuration; it starts NOOA inside a named OpenShell policy and exports
+   canonical events through Nodes routes.
 3. **Canvas integration:** selectable runtime nodes, run controls, policy-aware
    validation messages, and one shared event rendering path.
 4. **Durability and operations:** persist canonical events, resume streams,
