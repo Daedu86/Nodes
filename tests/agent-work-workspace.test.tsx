@@ -82,6 +82,6 @@ describe("AgentWorkWorkspace", () => {
 
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/agents/token?tokenId=token-1");
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "DELETE" });
-    expect(await screen.findByText(/No agent tokens found yet/i)).not.toBeNull();
+    expect(await screen.findByText(/No agents recorded yet/i)).not.toBeNull();
   });
 });

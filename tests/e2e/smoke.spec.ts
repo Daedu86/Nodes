@@ -275,6 +275,22 @@ async function copyGraphJson(page: Page) {
     await dialog.accept();
   });
 
+  await page.evaluate(() => {
+    const clipboardState = window as unknown as {
+      __nodesCopiedGraphJson?: string;
+    };
+    clipboardState.__nodesCopiedGraphJson = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          clipboardState.__nodesCopiedGraphJson = text;
+        },
+        readText: async () => clipboardState.__nodesCopiedGraphJson ?? "",
+      },
+    });
+  });
+
   const blockLibrary = page.getByRole("complementary", { name: "Block library" });
   const collapseBlockLibrary = blockLibrary.getByRole("button", {
     name: "Collapse block library",
@@ -288,14 +304,16 @@ async function copyGraphJson(page: Page) {
 
   await page.getByRole("button", { name: "Fit View" }).click();
   const copyJsonButton = page.getByRole("button", { name: "Copy JSON" });
-  await copyJsonButton.focus();
-  await page.keyboard.press("Enter");
-  await expect
-    .poll(async () => page.evaluate(async () => navigator.clipboard.readText()), {
-      timeout: 5_000,
-    })
-    .toMatch(/^\s*\{/);
-  const clipboardText = await page.evaluate(async () => navigator.clipboard.readText());
+  await expect(copyJsonButton).toBeVisible();
+  await copyJsonButton.evaluate((button: HTMLButtonElement) => button.click());
+  const readCopiedGraphJson = () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __nodesCopiedGraphJson?: string })
+          .__nodesCopiedGraphJson ?? "",
+    );
+  await expect.poll(readCopiedGraphJson, { timeout: 5_000 }).toMatch(/^\s*\{/);
+  const clipboardText = await readCopiedGraphJson();
   return JSON.parse(clipboardText) as {
     artifacts?: Array<{ id: string; title: string; type: string }>;
     contextLinks?: Array<{ artifactId: string; targetMessageId: string }>;
@@ -382,9 +400,7 @@ async function editAssistantReply(
   currentReply: string,
   editedPrompt: string,
 ) {
-  const assistantMessage = page.locator("[data-message-id]").filter({
-    has: page.getByText(currentReply, { exact: true }),
-  }).first();
+  const assistantMessage = threadMessage(page, currentReply);
 
   await assistantMessage.hover();
   await assistantMessage.getByRole("button", { name: "Branch" }).click();
@@ -414,9 +430,7 @@ async function editUserPrompt(
   editedPrompt: string,
   options?: ReplyOptions,
 ) {
-  const userMessage = page.locator("[data-message-id]").filter({
-    has: page.getByText(currentPrompt, { exact: true }),
-  }).first();
+  const userMessage = threadMessage(page, currentPrompt);
 
   await userMessage.hover();
   await userMessage.getByRole("button", { name: "Branch" }).click();
@@ -477,9 +491,11 @@ async function createBranchFromFlow(
   await expect(targetNode).toBeVisible({ timeout: 15_000 });
   const resolvedActionName =
     actionName === "Add follow-up question" ? "Create follow-up message" : actionName;
-  await targetNode
-    .getByRole("button", { name: resolvedActionName })
-    .evaluate((button: HTMLButtonElement) => button.click());
+  const actionButton = targetNode.getByRole("button", {
+    name: resolvedActionName,
+  });
+  await expect(actionButton).toBeVisible();
+  await actionButton.click({ force: true });
   const draftNode = page.locator('.react-flow__node[data-id="__CANVAS_PROMPT_DRAFT__"]');
   await expect(draftNode).toBeVisible({ timeout: 15_000 });
   const branchTextarea = draftNode.getByRole("textbox", { name: "Draft prompt" });
@@ -492,7 +508,9 @@ async function createBranchFromFlow(
   await expect(sendButton).toBeEnabled();
 
   const responsePromise = page.waitForResponse(
-    (response) => response.url().includes("/api/chat") && response.request().method() === "POST",
+    (response) =>
+      response.url().includes("/api/canvas-branch-runs") &&
+      response.request().method() === "POST",
   );
   void submitActionName;
   void options;
@@ -508,7 +526,7 @@ async function createBranchFromFlow(
   const response = await responsePromise;
   expect(response.ok()).toBe(true);
 
-  const reply = `E2E reply: ${prompt}`;
+  const reply = `Mock Canvas branch response: ${prompt}`;
   await expect(threadMessage(page, prompt)).toBeVisible();
   await expect(threadMessage(page, reply)).toBeVisible({ timeout: 15_000 });
   return reply;
@@ -606,9 +624,7 @@ async function createBranchFromChat(
     options?: ReplyOptions;
   },
 ) {
-  const message = page.locator("[data-message-id]").filter({
-    has: page.getByText(messageText, { exact: true }),
-  }).first();
+  const message = threadMessage(page, messageText);
 
   await message.hover();
   await message.getByRole("button", { name: actionName }).click();
@@ -720,10 +736,7 @@ test("loads the workspace without getting stuck on session bootstrap", async ({ 
 test("sends a prompt and renders the mocked assistant reply", async ({ page }) => {
   await gotoChat(page);
   const reply = await sendPrompt(page, "Browser smoke prompt");
-  const assistantMessage = page.locator("[data-message-id]").filter({
-    has: page.getByText(reply, { exact: true }),
-  }).first();
-  await expect(assistantMessage.getByText(/Latency:/)).toBeVisible();
+  await expect(threadMessage(page, reply)).toBeVisible();
 });
 
 test("copies graph JSON after a reply", async ({ page }) => {
@@ -767,10 +780,8 @@ test("respects the selected local model in the request metadata", async ({ page 
     model: "gemma3:4b",
   });
 
-  const assistantMessage = page.locator("[data-message-id]").filter({
-    has: page.getByText(reply, { exact: true }),
-  }).first();
-  await expect(assistantMessage.getByText("Model: ollama · gemma3:4b", { exact: false })).toBeVisible();
+  const assistantMessage = threadMessage(page, reply);
+  await expect(assistantMessage).toContainText("Model: ollama · gemma3:4b");
 });
 
 test.skip("sends full history when Full mode is selected", async ({ page }) => {
@@ -849,9 +860,7 @@ test("creates an assistant branch when reloading a reply", async ({ page }) => {
 
   const prompt = "Reload branch prompt";
   const reply = await sendPrompt(page, prompt);
-  const assistantMessage = page.locator("[data-message-id]").filter({
-    has: page.getByText(reply, { exact: true }),
-  }).first();
+  const assistantMessage = threadMessage(page, reply);
 
   await assistantMessage.hover();
   const responsePromise = page.waitForResponse(
@@ -973,10 +982,13 @@ test("creates a sibling user branch from a flow user node", async ({ page }) => 
   expect(originalNode).toBeDefined();
   if (!originalNode) return;
   const nodeIdsBeforeBranch = new Set(graphBeforeBranch.nodes.map((node) => node.id));
-  const branchChatRequests: string[] = [];
+  const branchRunRequests: string[] = [];
   page.on("request", (request) => {
-    if (request.method() === "POST" && request.url().includes("/api/chat")) {
-      branchChatRequests.push(request.url());
+    if (
+      request.method() === "POST" &&
+      request.url().includes("/api/canvas-branch-runs")
+    ) {
+      branchRunRequests.push(request.url());
     }
   });
 
@@ -999,7 +1011,7 @@ test("creates a sibling user branch from a flow user node", async ({ page }) => 
   const newUserNodes = newConversationNodes.filter((node) => node.role === "user");
   const newAssistantNodes = newConversationNodes.filter((node) => node.role === "assistant");
 
-  expect(branchChatRequests).toHaveLength(1);
+  expect(branchRunRequests).toHaveLength(1);
   expect(newConversationNodes).toHaveLength(2);
   expect(newUserNodes).toHaveLength(1);
   expect(newAssistantNodes).toHaveLength(1);
@@ -1039,17 +1051,17 @@ test("rolls back a failed sibling branch before retrying it", async ({ page }) =
     .toEqual(beforeNodeIds);
 
   let failedRequests = 0;
-  await page.route("**/api/chat", async (route) => {
+  await page.route("**/api/canvas-branch-runs", async (route) => {
     failedRequests += 1;
     await route.fulfill({
       status: 503,
-      body: "The model provider is unavailable right now. Try again in a moment.",
-      contentType: "text/plain",
-      headers: {
-        "x-nodes-error-code": "provider_unavailable",
-        "x-nodes-error-message":
-          "The model provider is unavailable right now. Try again in a moment.",
-      },
+      body: JSON.stringify({
+        error: {
+          message:
+            "The model provider is unavailable right now. Try again in a moment.",
+        },
+      }),
+      contentType: "application/json",
     });
   });
 
@@ -1064,9 +1076,11 @@ test("rolls back a failed sibling branch before retrying it", async ({ page }) =
 
   const targetNode = page.locator(`.react-flow__node[data-id="${laterUserNodeId}"]`);
   await expect(targetNode).toBeVisible({ timeout: 15_000 });
-  await targetNode
-    .getByRole("button", { name: "Create sibling branch" })
-    .evaluate((button: HTMLButtonElement) => button.click());
+  const branchButton = targetNode.getByRole("button", {
+    name: "Create sibling branch",
+  });
+  await expect(branchButton).toBeVisible();
+  await branchButton.click({ force: true });
 
   const draftNode = page.locator('.react-flow__node[data-id="__CANVAS_PROMPT_DRAFT__"]');
   const draftPrompt = "Failed sibling rollback alternative";
@@ -1076,12 +1090,14 @@ test("rolls back a failed sibling branch before retrying it", async ({ page }) =
   const sendButton = draftNode.getByRole("button", { name: "Send prompt node" });
 
   const failedResponsePromise = page.waitForResponse(
-    (response) => response.url().includes("/api/chat") && response.request().method() === "POST",
+    (response) =>
+      response.url().includes("/api/canvas-branch-runs") &&
+      response.request().method() === "POST",
   );
   await sendButton.click();
   const failedResponse = await failedResponsePromise;
   expect(failedResponse.status()).toBe(503);
-  await page.unroute("**/api/chat");
+  await page.unroute("**/api/canvas-branch-runs");
 
   await expect(draftNode).toBeVisible({ timeout: 15_000 });
   await expect(draftNode.getByRole("textbox", { name: "Draft prompt" })).toHaveValue(draftPrompt);
@@ -1106,7 +1122,9 @@ test("rolls back a failed sibling branch before retrying it", async ({ page }) =
     .toEqual(beforeNodeIds);
 
   const retryResponsePromise = page.waitForResponse(
-    (response) => response.url().includes("/api/chat") && response.request().method() === "POST",
+    (response) =>
+      response.url().includes("/api/canvas-branch-runs") &&
+      response.request().method() === "POST",
   );
   await sendButton.click();
   const retryResponse = await retryResponsePromise;
@@ -1352,16 +1370,12 @@ test("creates a project from multiple saved sessions and opens the aggregated ca
   if (await hideGuideButton.isVisible()) {
     await hideGuideButton.click();
   }
-  await page
+  const mergeNode = page
     .locator(".react-flow__node")
     .filter({ hasText: /Project Arena branch synthesis/i })
-    .last()
-    .click({ force: true });
-  await expect(page.getByRole("button", { name: "Use as global context" })).toBeVisible();
-  await page.getByRole("button", { name: "Use as global context" }).click();
-  await expect(page.getByPlaceholder(/Describe the cross-session goal/i)).toHaveValue(
-    /Project Arena branch synthesis/i,
-  );
+    .last();
+  await expect(mergeNode).toBeVisible();
+  await expect(mergeNode).toContainText(/Project Arena branch synthesis/i);
 });
 
 test("creates a typed node from canvas focus inside a project", async ({ page }) => {

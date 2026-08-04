@@ -125,11 +125,25 @@ async function readGraphViewport(viewport: Locator) {
 async function findEmptyPanePoint(pane: Locator) {
   return pane.evaluate((element) => {
     const rect = element.getBoundingClientRect();
-    for (let row = 1; row < 10; row += 1) {
-      for (let column = 1; column < 10; column += 1) {
-        const x = rect.left + (rect.width * column) / 10;
-        const y = rect.top + (rect.height * row) / 10;
-        if (document.elementFromPoint(x, y) === element) return { x, y };
+    const blockedSelector = [
+      ".react-flow__node",
+      ".react-flow__edge",
+      ".react-flow__panel",
+      "button",
+      "input",
+      "textarea",
+      "select",
+      "[role='button']",
+    ].join(",");
+
+    for (let row = 1; row < 16; row += 1) {
+      for (let column = 1; column < 16; column += 1) {
+        const x = rect.left + (rect.width * column) / 16;
+        const y = rect.top + (rect.height * row) / 16;
+        const hit = document.elementFromPoint(x, y);
+        if (hit && element.contains(hit) && !hit.closest(blockedSelector)) {
+          return { x, y };
+        }
       }
     }
     throw new Error("Could not find an uncovered Canvas pane point");

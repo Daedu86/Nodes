@@ -23,8 +23,7 @@ export type DirectBranchAppendMessage = {
 
 export type CanvasBranchRunResponse = {
   // Request-error responses can be either a plain string or a structured object.
-  // Keep this permissive at the network boundary; the caller narrows it at runtime.
-  error?: any;
+  error?: string | { message?: string };
   message?: string;
   modelId?: string;
   provider?: string;

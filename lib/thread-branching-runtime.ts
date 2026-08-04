@@ -219,14 +219,11 @@ export const executeBranchSpec = (
   const message = buildBranchAppendMessage(spec, options);
   if (!message) return false;
 
-  // Branch submissions are deliberately split into two explicit runtime actions.
-  // Relying on CreateAppendMessage.startRun for an off-head branch can append the
-  // optimistic user message without starting the AI SDK transport. That leaves the
-  // Canvas transaction waiting forever for a runEnd event that will never arrive.
-  // Append first with auto-run disabled, then start the run against the known new
-  // user-message id so every branch path uses the same deterministic lifecycle.
-  const shouldStartRun = message.startRun;
-  const appendMessage = shouldStartRun ? { ...message, startRun: false } : message;
+  // Let assistant-ui append the branch message and start its run as one
+  // runtime transaction. Calling startRun separately can race the repository
+  // publication of the appended message and produce "Message not found" for
+  // off-head branches.
+  const appendMessage = message;
 
   // assistant-ui's public ThreadRuntime.append coerces `parentId: null` into the
   // current head message. Only root-level branching needs the internal append to
@@ -246,14 +243,6 @@ export const executeBranchSpec = (
     }
   } else {
     threadRuntime.append(appendMessage);
-  }
-
-  if (shouldStartRun) {
-    threadRuntime.startRun({
-      parentId: message.id,
-      sourceId: message.sourceId,
-      runConfig: message.runConfig,
-    });
   }
 
   return true;

@@ -396,7 +396,7 @@ export function prepareChatRequest(body: ChatRequestBody): PreparedChatRequest {
     messagesToSend:
       scopedMessagesToSend.length > 0
         ? scopedMessagesToSend
-        : selectMessagesForHistoryMode(messages, historyMode ?? "full"),
+        : selectMessagesForHistoryMode(messages, historyMode ?? "last"),
     rawMessages,
     requestedModel: getRequestedModelConfig(effectiveBody),
     system: body.system,
