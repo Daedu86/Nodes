@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: conversation-stack-compat-${{ github.ref }}
@@ -15,7 +15,7 @@ jobs:
   validate:
     if: github.head_ref == 'maintenance/conversation-stack-compat'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       CI: true
       NEXT_TELEMETRY_DISABLED: 1
@@ -30,7 +30,6 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: maintenance/conversation-stack-compat
-          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -38,7 +37,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      - name: Pin the compatible conversation runtime and align E2E expectations
+      - name: Pin compatible runtime and align E2E expectations
         run: |
           python - <<'PY'
           import json
@@ -103,32 +102,46 @@ jobs:
           test_path.write_text(source.replace(old_latency, new_latency, 1))
           PY
 
-      - name: Regenerate and verify the lockfile
+      - name: Regenerate and verify lockfile
         run: |
           npm install --package-lock-only --ignore-scripts --no-audit --fund=false
           npm ci --no-audit --fund=false
 
-      - name: Validate types and lint
+      - name: Validate lint and types
         run: |
           npm run lint
           npm run typecheck
           npm run typecheck:e2e
 
+      - name: Validate production build and bundle budget
+        run: npm run build:budget
+
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
-      - name: Run the affected E2E shard
-        run: npm run test:e2e -- --workers=1 --shard=2/4
-
-      - name: Finalize compatibility changes
+      - name: Run affected E2E shards
         run: |
-          set -euo pipefail
-          git fetch origin maintenance/dependency-consolidation
-          git show origin/maintenance/dependency-consolidation:.github/workflows/ci.yml > .github/workflows/ci.yml
-          git show origin/maintenance/dependency-consolidation:.github/workflows/codeql.yml > .github/workflows/codeql.yml
-          rm .github/workflows/conversation-stack-compat.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json tests/e2e/smoke.spec.ts .github/workflows/ci.yml .github/workflows/codeql.yml .github/workflows/conversation-stack-compat.yml
-          git commit -m "fix: pin compatible conversation runtime"
-          git push origin HEAD:maintenance/conversation-stack-compat
+          npm run test:e2e -- --workers=1 --shard=1/4
+          npm run test:e2e -- --workers=1 --shard=2/4
+
+      - name: Upload validated candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: conversation-stack-candidate
+          path: |
+            package.json
+            package-lock.json
+            tests/e2e/smoke.spec.ts
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload Playwright failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: conversation-stack-failure
+          path: |
+            test-results
+            playwright-report
+          if-no-files-found: ignore
+          retention-days: 3
