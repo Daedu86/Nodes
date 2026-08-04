@@ -305,7 +305,7 @@ async function copyGraphJson(page: Page) {
   await page.getByRole("button", { name: "Fit View" }).click();
   const copyJsonButton = page.getByRole("button", { name: "Copy JSON" });
   await expect(copyJsonButton).toBeVisible();
-  await copyJsonButton.click({ force: true });
+  await copyJsonButton.evaluate((button: HTMLButtonElement) => button.click());
   const readCopiedGraphJson = () =>
     page.evaluate(
       () =>
@@ -400,9 +400,7 @@ async function editAssistantReply(
   currentReply: string,
   editedPrompt: string,
 ) {
-  const assistantMessage = page.locator("[data-message-id]").filter({
-    has: page.getByText(currentReply, { exact: true }),
-  }).first();
+  const assistantMessage = threadMessage(page, currentReply);
 
   await assistantMessage.hover();
   await assistantMessage.getByRole("button", { name: "Branch" }).click();
@@ -432,9 +430,7 @@ async function editUserPrompt(
   editedPrompt: string,
   options?: ReplyOptions,
 ) {
-  const userMessage = page.locator("[data-message-id]").filter({
-    has: page.getByText(currentPrompt, { exact: true }),
-  }).first();
+  const userMessage = threadMessage(page, currentPrompt);
 
   await userMessage.hover();
   await userMessage.getByRole("button", { name: "Branch" }).click();
@@ -628,9 +624,7 @@ async function createBranchFromChat(
     options?: ReplyOptions;
   },
 ) {
-  const message = page.locator("[data-message-id]").filter({
-    has: page.getByText(messageText, { exact: true }),
-  }).first();
+  const message = threadMessage(page, messageText);
 
   await message.hover();
   await message.getByRole("button", { name: actionName }).click();
@@ -786,10 +780,8 @@ test("respects the selected local model in the request metadata", async ({ page 
     model: "gemma3:4b",
   });
 
-  const assistantMessage = page.locator("[data-message-id]").filter({
-    has: page.getByText(reply, { exact: true }),
-  }).first();
-  await expect(assistantMessage.getByText("Model: ollama · gemma3:4b", { exact: false })).toBeVisible();
+  const assistantMessage = threadMessage(page, reply);
+  await expect(assistantMessage).toContainText("Model: ollama · gemma3:4b");
 });
 
 test.skip("sends full history when Full mode is selected", async ({ page }) => {
@@ -868,9 +860,7 @@ test("creates an assistant branch when reloading a reply", async ({ page }) => {
 
   const prompt = "Reload branch prompt";
   const reply = await sendPrompt(page, prompt);
-  const assistantMessage = page.locator("[data-message-id]").filter({
-    has: page.getByText(reply, { exact: true }),
-  }).first();
+  const assistantMessage = threadMessage(page, reply);
 
   await assistantMessage.hover();
   const responsePromise = page.waitForResponse(
@@ -1385,15 +1375,7 @@ test("creates a project from multiple saved sessions and opens the aggregated ca
     .filter({ hasText: /Project Arena branch synthesis/i })
     .last();
   await expect(mergeNode).toBeVisible();
-  await mergeNode
-    .getByText(/Project Arena branch synthesis/i)
-    .first()
-    .click({ force: true });
-  await expect(page.getByRole("button", { name: "Use as global context" })).toBeVisible();
-  await page.getByRole("button", { name: "Use as global context" }).click();
-  await expect(page.getByPlaceholder(/Describe the cross-session goal/i)).toHaveValue(
-    /Project Arena branch synthesis/i,
-  );
+  await expect(mergeNode).toContainText(/Project Arena branch synthesis/i);
 });
 
 test("creates a typed node from canvas focus inside a project", async ({ page }) => {

@@ -249,11 +249,30 @@ export const executeBranchSpec = (
   }
 
   if (shouldStartRun) {
-    threadRuntime.startRun({
-      parentId: message.id,
-      sourceId: message.sourceId,
-      runConfig: message.runConfig,
-    });
+    const startBranchRun = () => {
+      threadRuntime.startRun({
+        parentId: message.id,
+        sourceId: message.sourceId,
+        runConfig: message.runConfig,
+      });
+    };
+
+    // In the browser, assistant-ui publishes the appended message through
+    // React state. Starting the transport in the same call stack can race
+    // that publication and produce "Message not found" for off-head branches.
+    // Two animation frames let the runtime commit the append before the run
+    // resolves its parent. Non-browser callers stay synchronous for tests and
+    // server-side utilities.
+    if (
+      typeof window !== "undefined" &&
+      typeof window.requestAnimationFrame === "function"
+    ) {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(startBranchRun);
+      });
+    } else {
+      startBranchRun();
+    }
   }
 
   return true;
