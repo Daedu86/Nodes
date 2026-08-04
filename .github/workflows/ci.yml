@@ -2,7 +2,7 @@ name: Validate conversation stack compatibility
 
 on:
   pull_request:
-    branches: [maintenance/dependency-consolidation]
+    branches: [main]
 
 permissions:
   contents: write
@@ -125,9 +125,10 @@ jobs:
           set -euo pipefail
           git fetch origin maintenance/dependency-consolidation
           git show origin/maintenance/dependency-consolidation:.github/workflows/ci.yml > .github/workflows/ci.yml
+          git show origin/maintenance/dependency-consolidation:.github/workflows/codeql.yml > .github/workflows/codeql.yml
           rm .github/workflows/conversation-stack-compat.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json tests/e2e/smoke.spec.ts .github/workflows/ci.yml .github/workflows/conversation-stack-compat.yml
+          git add package.json package-lock.json tests/e2e/smoke.spec.ts .github/workflows/ci.yml .github/workflows/codeql.yml .github/workflows/conversation-stack-compat.yml
           git commit -m "fix: pin compatible conversation runtime"
           git push origin HEAD:maintenance/conversation-stack-compat
