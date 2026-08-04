@@ -23,7 +23,7 @@ export type BranchSpec = {
   parentId: string | null;
   sourceId: string | null;
   targetRole: "user";
-  startRun: true;
+  startRun: boolean;
   placeholder: string;
   title: string;
 };
