@@ -824,9 +824,11 @@ export function useCanvasBranchSubmission({
           | null;
         if (!response.ok) {
           const structuredError =
-            payload?.error && typeof payload.error === "object"
+            typeof payload?.error === "object" && payload.error !== null
               ? payload.error.message
-              : payload?.error;
+              : typeof payload?.error === "string"
+                ? payload.error
+                : undefined;
           throw new Error(
             structuredError ||
               payload?.message ||
