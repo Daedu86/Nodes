@@ -100,15 +100,10 @@ describe("thread branching runtime", () => {
         id: expect.any(String),
         parentId: null,
         sourceId: null,
-        startRun: false,
+        startRun: true,
       }),
     );
-    expect(startRun).toHaveBeenCalledTimes(1);
-    expect(startRun).toHaveBeenCalledWith({
-      parentId: appended.id,
-      sourceId: null,
-      runConfig: appended.runConfig,
-    });
+    expect(startRun).not.toHaveBeenCalled();
   });
 
   it("uses public append as one atomic non-root full-tree transaction", () => {
@@ -151,7 +146,7 @@ describe("thread branching runtime", () => {
       expect.objectContaining({
         id: expect.any(String),
         parentId: "assistant-node-1",
-        startRun: false,
+        startRun: true,
         metadata: {
           custom: expect.objectContaining({
             contextScope: "tree",
@@ -166,12 +161,7 @@ describe("thread branching runtime", () => {
         },
       }),
     );
-    expect(startRun).toHaveBeenCalledTimes(1);
-    expect(startRun).toHaveBeenCalledWith({
-      parentId: appended.id,
-      sourceId: "assistant-node-1",
-      runConfig: appended.runConfig,
-    });
+    expect(startRun).not.toHaveBeenCalled();
   });
 
   it("falls back to public append while keeping the root run atomic", () => {
@@ -197,15 +187,10 @@ describe("thread branching runtime", () => {
         id: expect.any(String),
         parentId: null,
         role: "user",
-        startRun: false,
+        startRun: true,
       }),
     );
-    expect(startRun).toHaveBeenCalledTimes(1);
-    expect(startRun).toHaveBeenCalledWith({
-      parentId: appended.id,
-      sourceId: null,
-      runConfig: appended.runConfig,
-    });
+    expect(startRun).not.toHaveBeenCalled();
   });
 
   it("does not start a run when the branch spec is append-only", () => {
