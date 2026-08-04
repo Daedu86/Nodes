@@ -12,7 +12,7 @@ export const AGENT_RUNTIME_CATALOG: AgentRuntimeCatalog = {
   nooa: {
     id: "nooa",
     label: "NOOA",
-    deliveryStatus: "planned",
+    deliveryStatus: "enabled",
     capabilities: ["event_stream", "sandbox_policy", "trace_export"],
     supportedRoles: ["custom"],
     requiresOpenShellPolicy: true,
