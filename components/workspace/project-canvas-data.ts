@@ -6,7 +6,7 @@ import {
   PROJECT_MEMORY_META,
   PROJECT_MEMORY_TYPE_ORDER,
 } from "@/lib/project-memory-meta";
-import type { ProjectDocument } from "@/lib/project-documents";
+import { PROJECT_MAP_FILENAME, type ProjectDocument } from "@/lib/project-documents";
 import type { SessionDocument } from "@/lib/session-documents";
 import { getSessionTreeStats } from "@/lib/session-context";
 import {
@@ -27,6 +27,7 @@ const SESSION_SWATCHES = [
   "#9333ea",
   "#0891b2",
 ];
+const PROJECT_MAP_ACCENT = "#d97706";
 
 const formatSessionTitle = (title: string | null) => title?.trim() || "Untitled Session";
 
@@ -89,14 +90,14 @@ export function buildProjectCanvasFlow(
     type: "artifactNode",
     position: { x: -420, y: 48 },
     data: {
+      accent: PROJECT_MAP_ACCENT,
       artifactType: "text",
       kind: "artifact",
       linkedArtifactCount: orderedSessions.length,
-      preview:
-        project.globalContext.trim() ||
-        "Global context across every session in this project. Add shared goals, constraints, or synthesis notes here.",
+      preview: project.globalContext,
       role: "global-context",
-      title: project.title?.trim() ? `${project.title} Context` : "Global Project Context",
+      statusLabel: `${PROJECT_MAP_FILENAME} · base of project`,
+      title: project.title?.trim() ? `${project.title} Map` : "Project Map",
     },
   });
 
@@ -151,12 +152,12 @@ export function buildProjectCanvasFlow(
       source: memoryNodeId,
       target: globalContextNodeId,
       type: "threadEdge",
-        data: {
-          accent: memoryMeta.accent,
-          label: memoryMeta.label.toLowerCase(),
-          tone: "context",
-        },
-      });
+      data: {
+        accent: memoryMeta.accent,
+        label: memoryMeta.label.toLowerCase(),
+        tone: "context",
+      },
+    });
 
     if (memoryItem.type === "merge") {
       resolveMemorySourceNodeIds(project.id, memoryItem).forEach((sourceNodeId) => {
@@ -214,7 +215,7 @@ export function buildProjectCanvasFlow(
       type: "threadEdge",
       data: {
         accent: sessionColor,
-        label: "global",
+        label: "map",
         tone: "context",
       },
     });
