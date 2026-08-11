@@ -27,15 +27,15 @@ export type ProjectMapNodeOutput = {
 };
 
 export type ProjectMapNode = {
-  childProjectId: string | null;
+  childProjectId?: string | null;
   description: string;
   id: string;
-  nodeType: ProjectMapNodeType;
+  nodeType?: ProjectMapNodeType;
   primarySessionId: string | null;
   selectedOutput: ProjectMapNodeOutput | null;
   sessionIds: string[];
   status: ProjectMapNodeStatus;
-  terminalResult: boolean;
+  terminalResult?: boolean;
   title: string;
 };
 
