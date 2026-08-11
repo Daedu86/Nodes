@@ -55,6 +55,7 @@ export type ThreadGraphFlowNodeData = {
     | "agent-activity";
   language?: string | null;
   linkedArtifactCount?: number;
+  mapNodeId?: string | null;
   memoryId?: string | null;
   memoryType?: ProjectMemoryType | null;
   model?: string | null;
@@ -72,6 +73,7 @@ export type ThreadGraphFlowNodeData = {
   idx?: number;
   messageId?: string | null;
   sessionId?: string | null;
+  sessionIds?: string[];
   sessionTitle?: string | null;
   sourceDataUrl?: string | null;
   statusLabel?: string | null;
