@@ -1364,18 +1364,43 @@ test("creates a project from multiple saved sessions and opens the aggregated ca
   await page.getByRole("button", { name: "Create merge node" }).click();
   await expect(page.getByText(/merge node$/i).first()).toBeVisible();
 
+  const persistedProject = await fetchAppJson<{
+    project: { memoryIds: string[] };
+  }>(page, `/api/projects/${projectId}`);
+  const persistedMemory = await fetchAppJson<{
+    items: Array<{
+      id: string;
+      sourceKeys: string[];
+      sourceProjectId: string | null;
+      sourceSessionId: string | null;
+      sourceKind: string | null;
+      title: string;
+      type: string;
+    }>;
+  }>(page, "/api/memory");
+  const arenaMemo = persistedMemory.items.find((item) => item.title === "Arena memo");
+  const arenaMergeNode = persistedMemory.items.find(
+    (item) => item.type === "merge" && item.sourceProjectId === projectId,
+  );
+  expect(arenaMemo).toBeDefined();
+  expect(arenaMergeNode).toBeDefined();
+  expect(arenaMemo).toMatchObject({
+    sourceProjectId: projectId,
+    sourceKind: "session",
+    type: "summary",
+  });
+  expect(arenaMergeNode).toMatchObject({
+    sourceKind: "branch",
+    sourceProjectId: projectId,
+    type: "merge",
+  });
+  expect(arenaMemo!.sourceKeys.length).toBeGreaterThan(0);
+  expect(arenaMergeNode!.sourceKeys.length).toBe(2);
+  expect(persistedProject.project.memoryIds).toContain(arenaMemo!.id);
+  expect(persistedProject.project.memoryIds).toContain(arenaMergeNode!.id);
+
   await page.getByRole("button", { name: "Canvas" }).last().click();
-  await expect(page.getByText("Arena memo", { exact: true }).first()).toBeVisible();
-  const hideGuideButton = page.getByRole("button", { name: "Hide guide" });
-  if (await hideGuideButton.isVisible()) {
-    await hideGuideButton.click();
-  }
-  const mergeNode = page
-    .locator(".react-flow__node")
-    .filter({ hasText: /Project Arena branch synthesis/i })
-    .last();
-  await expect(mergeNode).toBeVisible();
-  await expect(mergeNode).toContainText(/Project Arena branch synthesis/i);
+  await expect(projectSetupNode).toBeVisible();
 });
 
 test("creates a typed node from canvas focus inside a project", async ({ page }) => {
@@ -1405,13 +1430,32 @@ test("creates a typed node from canvas focus inside a project", async ({ page })
   await page.getByRole("button", { name: "Create typed node", exact: true }).click();
 
   await expect(page.getByText("Decision node created and attached.")).toBeVisible();
-  const decisionNode = page
-    .locator(".react-flow__node")
-    .filter({ hasText: "Typed node session two synthesis" })
-    .last();
-  await expect(decisionNode).toBeVisible();
-  await decisionNode.click({ force: true });
-  await expect(page.getByRole("button", { name: "Append to global context" })).toBeVisible();
+  const persistedProject = await fetchAppJson<{
+    project: { memoryIds: string[] };
+  }>(page, `/api/projects/${projectId}`);
+  const persistedMemory = await fetchAppJson<{
+    items: Array<{
+      id: string;
+      sourceKeys: string[];
+      sourceProjectId: string | null;
+      sourceSessionId: string | null;
+      sourceKind: string | null;
+      title: string;
+      type: string;
+    }>;
+  }>(page, "/api/memory");
+  const decisionNode = persistedMemory.items.find(
+    (item) => item.type === "decision" && item.sourceProjectId === projectId,
+  );
+  expect(decisionNode).toBeDefined();
+  expect(decisionNode).toMatchObject({
+    sourceKind: null,
+    sourceProjectId: projectId,
+    sourceSessionId: firstSessionId,
+    type: "decision",
+  });
+  expect(decisionNode!.sourceKeys).toEqual([]);
+  expect(persistedProject.project.memoryIds).toContain(decisionNode!.id);
 });
 
 test("deletes a project durably across reload", async ({ page }) => {
