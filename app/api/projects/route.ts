@@ -6,6 +6,7 @@ import {
   createProjectForUser,
   listProjectsForUser,
 } from "@/lib/project-collaboration";
+import { createDefaultProjectMap } from "@/lib/project-documents";
 import { listMemoryItems } from "@/lib/memory-store";
 import { listSessions } from "@/lib/session-store";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
@@ -52,8 +53,9 @@ export async function POST(req: Request) {
   const allowedMemoryIds = new Set(memoryItems.map((item) => item.id));
   const sessionIds = requestedSessionIds.filter((sessionId) => allowedSessionIds.has(sessionId));
   const memoryIds = requestedMemoryIds.filter((memoryId) => allowedMemoryIds.has(memoryId));
+  const requestedMap = typeof body.globalContext === "string" ? body.globalContext.trim() : "";
   const project = await createProjectForUser({
-    globalContext: typeof body.globalContext === "string" ? body.globalContext : "",
+    globalContext: requestedMap || createDefaultProjectMap(body.title ?? null),
     memoryIds,
     sessionIds,
     title: body.title ?? null,
