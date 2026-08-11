@@ -6,7 +6,8 @@ import {
   createProjectForUser,
   listProjectsForUser,
 } from "@/lib/project-collaboration";
-import { filterProjectMapSessions, getProjectMapSessionIds } from "@/lib/project-map";
+import { filterProjectMapSessions, getProjectMapSessionIds, normalizeProjectMap } from "@/lib/project-map";
+import { createProjectMapForTitle } from "@/lib/project-map-templates";
 import { listMemoryItems } from "@/lib/memory-store";
 import { listSessions } from "@/lib/session-store";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
@@ -52,10 +53,27 @@ export async function POST(req: Request) {
   ]);
   const allowedSessionIds = new Set(sessions.map((session) => session.id));
   const allowedMemoryIds = new Set(memoryItems.map((item) => item.id));
-  const map = filterProjectMapSessions(body.map, allowedSessionIds);
-  const sessionIds = map.nodes.length > 0
-    ? getProjectMapSessionIds(map)
-    : requestedSessionIds.filter((sessionId) => allowedSessionIds.has(sessionId));
+  const validRequestedSessionIds = requestedSessionIds.filter((sessionId) => allowedSessionIds.has(sessionId));
+  const requestedMap = filterProjectMapSessions(body.map, allowedSessionIds);
+  const seededMap = body.map === undefined
+    ? createProjectMapForTitle(body.title ?? null)
+    : requestedMap;
+  const map = seededMap.nodes.length > 0 && validRequestedSessionIds.length > 0 && getProjectMapSessionIds(seededMap).length === 0
+    ? normalizeProjectMap({
+        ...seededMap,
+        nodes: seededMap.nodes.map((node, index) =>
+          index === 0
+            ? {
+                ...node,
+                primarySessionId: validRequestedSessionIds[0] ?? null,
+                sessionIds: validRequestedSessionIds,
+                status: "ready",
+              }
+            : node,
+        ),
+      })
+    : seededMap;
+  const sessionIds = getProjectMapSessionIds(map);
   const memoryIds = requestedMemoryIds.filter((memoryId) => allowedMemoryIds.has(memoryId));
   const project = await createProjectForUser({
     globalContext: typeof body.globalContext === "string" ? body.globalContext : "",
