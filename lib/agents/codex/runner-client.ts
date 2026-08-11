@@ -65,11 +65,17 @@ export type CodexRunnerReadiness = {
   authenticated: boolean;
   model: string | null;
   workspaceCount: number;
+  workspaceIds: string[];
   hasDefaultWorkspace: boolean;
 };
 
 const asRunnerBody = async (response: Response) =>
   ((await response.json().catch(() => null)) as Record<string, unknown> | null) ?? {};
+
+const stringArrayField = (value: unknown) =>
+  Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
 
 export async function getCodexRunnerReadiness(
   ownerId: string,
@@ -104,6 +110,7 @@ export async function getCodexRunnerReadiness(
     authenticated: ready.authenticated === true,
     model: stringField(ready.model) ?? stringField(health.model),
     workspaceCount: numberField(ready.workspaceCount ?? health.workspaceCount),
+    workspaceIds: stringArrayField(ready.workspaceIds),
     hasDefaultWorkspace:
       ready.hasDefaultWorkspace === true || health.hasDefaultWorkspace === true,
   };
