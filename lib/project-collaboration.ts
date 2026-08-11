@@ -60,6 +60,7 @@ const hydrateProjectDocument = async (
     createdAt: project.createdAt,
     globalContext: project.globalContext,
     id: project.id,
+    map: project.map,
     members: project.members,
     memoryIds: project.memoryIds,
     sessionCount: project.sessionCount,
@@ -85,7 +86,7 @@ const assertOwner = (project: ProjectDocument) => {
 };
 
 const patchTouchesOwnerOnlyFields = (patch: ProjectPatch) =>
-  patch.sessionIds !== undefined || patch.memoryIds !== undefined;
+  patch.map !== undefined || patch.sessionIds !== undefined || patch.memoryIds !== undefined;
 
 export async function listProjectsForUser(user: AuthenticatedUser): Promise<ProjectSummary[]> {
   return listProjectsForActor(toProjectActor(user));
@@ -111,7 +112,7 @@ export async function patchProjectForUser(
   const project = await getProjectForUser(projectId, user);
   assertEditable(project);
   if (project.accessRole !== "owner" && patchTouchesOwnerOnlyFields(patch)) {
-    throw new ProjectAccessError("Only the project owner can change attached sessions or typed nodes.", 403);
+    throw new ProjectAccessError("Only the project owner can change the project map, attached sessions, or typed nodes.", 403);
   }
   const updated = await patchProject(
     projectId,
