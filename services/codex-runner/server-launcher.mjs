@@ -1,9 +1,9 @@
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const runnerDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/, "$1"));
+const runnerDir = path.dirname(fileURLToPath(import.meta.url));
 const sourcePath = path.join(runnerDir, "server.mjs");
 const source = await readFile(sourcePath, "utf8");
 
