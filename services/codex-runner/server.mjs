@@ -8,6 +8,7 @@ import readline from "node:readline";
 const PORT = Number(process.env.CODEX_RUNNER_PORT || 8787);
 const HOST = process.env.CODEX_RUNNER_HOST || "127.0.0.1";
 const CODEX_BIN = process.env.CODEX_BIN || "codex";
+const MODEL = process.env.CODEX_RUNNER_MODEL?.trim() || "gpt-5.6-luna";
 const RUNNER_TOKEN = process.env.CODEX_RUNNER_TOKEN?.trim() || null;
 const DEFAULT_CWD = process.env.CODEX_DEFAULT_CWD?.trim() || null;
 const AUTO_APPROVE = process.env.CODEX_RUNNER_AUTO_APPROVE === "1";
@@ -356,7 +357,7 @@ async function startRun(body, ownerId) {
   const runId = randomUUID();
   const run = registerRun(makeRunRecord({ runId, agentId: asString(body.agentId) || `codex-${runId.slice(0, 8)}`, ownerId, parentRunId, sessionId: asString(body.sessionId), projectId: asString(body.projectId), workspaceId: workspace.workspaceId, cwd: workspace.cwd, role: asString(body.role) || "coder", label: asString(body.label) || (parentRun ? "Codex Subagent" : "Codex Agent") }));
   try {
-    const threadResult = await codex.request("thread/start", { cwd: workspace.cwd });
+    const threadResult = await codex.request("thread/start", { cwd: workspace.cwd, model: MODEL });
     const threadId = getNestedString(threadResult, ["thread", "id"]);
     if (!threadId) throw new Error("Codex did not return a thread id.");
     run.threadId = threadId;
@@ -390,14 +391,14 @@ function resolveApproval(run, approvalId, decision) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-  if (url.pathname === "/healthz") return json(res, 200, { ok: true, codexRunning: Boolean(codex.proc), runs: runs.size, workspaceCount: WORKSPACES.size, hasDefaultWorkspace: Boolean(DEFAULT_CWD) });
+  if (url.pathname === "/healthz") return json(res, 200, { ok: true, codexRunning: Boolean(codex.proc), model: MODEL, runs: runs.size, workspaceCount: WORKSPACES.size, hasDefaultWorkspace: Boolean(DEFAULT_CWD) });
   if (!authorize(req)) return json(res, 401, { error: "Unauthorized." });
 
   try {
     if (url.pathname === "/readyz" && req.method === "GET") {
       await codex.ensureStarted();
       const account = await codex.request("account/read", {});
-      return json(res, 200, { ok: true, codexRunning: true, authenticated: Boolean(account), workspaceCount: WORKSPACES.size, hasDefaultWorkspace: Boolean(DEFAULT_CWD) });
+      return json(res, 200, { ok: true, codexRunning: true, model: MODEL, authenticated: Boolean(account), workspaceCount: WORKSPACES.size, hasDefaultWorkspace: Boolean(DEFAULT_CWD) });
     }
 
     if (url.pathname === "/v1/account/usage" && req.method === "GET") {
