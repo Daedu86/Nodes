@@ -1341,12 +1341,12 @@ test("creates a project from multiple saved sessions and opens the aggregated ca
   await expect(
     page.getByText("Projects aggregate multiple saved sessions into one persistent canvas."),
   ).toBeVisible();
-  await expect(
-    page.getByText("Unified canvas for 2 sessions and one shared project context node."),
-  ).toBeVisible();
-  await expect(
-    page.locator(".react-flow__node").filter({ hasText: "2 Session Project Context" }).first(),
-  ).toBeVisible();
+  const projectSetupNode = page
+    .locator(".react-flow__node")
+    .filter({ has: page.getByRole("heading", { name: "Project Setup", exact: true }) })
+    .first();
+  await expect(projectSetupNode).toBeVisible();
+  await expect(projectSetupNode).toContainText("2 sessions");
 
   await page.getByRole("button", { name: "Arena" }).last().click();
   await expect(page.getByRole("heading", { name: "Project Arena" })).toBeVisible();
@@ -1392,8 +1392,12 @@ test("creates a typed node from canvas focus inside a project", async ({ page })
   );
   await openProjectById(page, projectId);
 
-  await expect(page.getByText("Unified canvas for 2 sessions and one shared project context node.")).toBeVisible();
-  await page.locator(".react-flow__node").filter({ hasText: "Typed node session one" }).first().click();
+  const projectSetupNode = page
+    .locator(".react-flow__node")
+    .filter({ has: page.getByRole("heading", { name: "Project Setup", exact: true }) })
+    .first();
+  await expect(projectSetupNode).toBeVisible();
+  await projectSetupNode.click();
 
   await page.getByRole("button", { name: "Open Nodes" }).click();
   await page.getByLabel("Typed node type").selectOption("decision");
