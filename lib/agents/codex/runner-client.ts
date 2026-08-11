@@ -86,8 +86,11 @@ export async function getCodexRunnerReadiness(
   const readyResponse = await runnerFetch(ownerId, "/readyz", {
     method: "GET",
     signal: AbortSignal.timeout(8_000),
-  }).catch(() => null);
-  const ready = readyResponse ? await asRunnerBody(readyResponse) : {};
+  });
+  if (!readyResponse.ok) {
+    throw new Error(await readRunnerError(readyResponse));
+  }
+  const ready = await asRunnerBody(readyResponse);
 
   const numberField = (value: unknown) =>
     typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
@@ -96,7 +99,7 @@ export async function getCodexRunnerReadiness(
 
   return {
     reachable: true,
-    ok: readyResponse?.ok === true && ready.ok === true,
+    ok: ready.ok === true,
     codexRunning: ready.codexRunning === true || health.codexRunning === true,
     authenticated: ready.authenticated === true,
     model: stringField(ready.model) ?? stringField(health.model),
