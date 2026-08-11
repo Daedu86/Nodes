@@ -13,6 +13,7 @@ const saveActiveProjectMember = vi.fn();
 const saveActiveProjectPatch = vi.fn(async (patch?: unknown) => patch);
 const createMemoryItem = vi.fn();
 const deleteMemoryItem = vi.fn();
+const selectProject = vi.fn(async () => undefined);
 
 const sampleSession = {
   archived: false,
@@ -52,6 +53,7 @@ const projectsContext = {
   removeActiveProjectMember,
   saveActiveProjectMember,
   saveActiveProjectPatch,
+  selectProject,
 };
 
 const persistedSessionsContext = {
@@ -151,6 +153,17 @@ describe("ProjectWorkspace", () => {
     saveActiveProjectPatch.mockClear();
     createMemoryItem.mockReset();
     deleteMemoryItem.mockReset();
+    selectProject.mockClear();
+  });
+
+  it("refreshes the project canvas from the latest saved project state", async () => {
+    const user = userEvent.setup();
+
+    render(<ProjectWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "Refresh project canvas" }));
+
+    expect(selectProject).toHaveBeenCalledWith("project-1");
   });
 
   afterEach(() => {

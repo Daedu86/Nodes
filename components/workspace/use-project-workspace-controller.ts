@@ -17,7 +17,7 @@ import { buildProjectArenaBranchEntries, type ProjectArenaBranchEntry, type Proj
 import { buildProjectContextDraft, buildProjectContextSources, getDefaultProjectContextSourceIds } from "@/lib/project-context-builder";
 const encoder = new TextEncoder();
 export function useProjectWorkspaceController() {
-    const { activeProject, clearActiveProject, removeActiveProjectMember, saveActiveProjectMember, saveActiveProjectPatch, } = useProjects();
+    const { activeProject, clearActiveProject, removeActiveProjectMember, saveActiveProjectMember, saveActiveProjectPatch, selectProject, } = useProjects();
     const { data: session } = useSession();
     const { activeSessionId, sessions: sessionSummaries } = usePersistedSessions();
     const { createMemoryItem, deleteMemoryItem, isReady: isMemoryReady, items: memoryItems } = useReusableMemory();
@@ -43,6 +43,7 @@ export function useProjectWorkspaceController() {
     const [memberRoleDraft, setMemberRoleDraft] = React.useState<ProjectCollaboratorRole>("viewer");
     const [memberActionState, setMemberActionState] = React.useState<"idle" | "saving" | "saved" | "error">("idle");
     const [memberActionMessage, setMemberActionMessage] = React.useState("Share this project with editors or viewers.");
+    const [isRefreshingCanvas, setIsRefreshingCanvas] = React.useState(false);
     const shouldPreferArenaOnLoad = React.useMemo(() => (activeProject?.sessionIds.length ?? 0) >= PROJECT_CANVAS_AUTOSTART_SESSION_THRESHOLD, [activeProject?.sessionIds.length]);
     useResetProjectWorkspaceState({
         activeProject,
@@ -141,6 +142,17 @@ export function useProjectWorkspaceController() {
         }
         window.location.assign(`/?sessionId=${encodeURIComponent(targetSessionId)}`);
     }, [activeProject?.sessionIds, activeSessionId, clearActiveProject]);
+    const handleRefreshCanvas = React.useCallback(async () => {
+        if (!activeProject || isRefreshingCanvas)
+            return;
+        setIsRefreshingCanvas(true);
+        try {
+            await selectProject(activeProject.id);
+        }
+        finally {
+            setIsRefreshingCanvas(false);
+        }
+    }, [activeProject, isRefreshingCanvas, selectProject]);
     const handleAddSession = React.useCallback(async (sessionId: string) => {
         if (!activeProject)
             return;
@@ -777,6 +789,8 @@ export function useProjectWorkspaceController() {
         handleCommitTitle,
         handleOpenSession,
         handleExitProject,
+        handleRefreshCanvas,
+        isRefreshingCanvas,
         handleAddSession,
         handleRemoveSession,
         availableSessions,

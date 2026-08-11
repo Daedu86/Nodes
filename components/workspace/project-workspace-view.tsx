@@ -1,5 +1,5 @@
 "use client";
-import { ArrowUpRight, BarChart3, BookCopy, GitBranchPlus, Network, PlusIcon, Trash2Icon } from "lucide-react";
+import { ArrowUpRight, BarChart3, BookCopy, GitBranchPlus, Network, PlusIcon, RefreshCw, Trash2Icon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { estimateTokenCount, formatBytes } from "@/lib/context-budget";
@@ -15,7 +15,7 @@ import type { useProjectWorkspaceController } from "@/components/workspace/use-p
 const encoder = new TextEncoder();
 type ProjectWorkspaceViewProps = NonNullable<ReturnType<typeof useProjectWorkspaceController>>;
 export function ProjectWorkspaceView(props: ProjectWorkspaceViewProps) {
-    const { activeProject, isMemoryReady, selectedCanvasItem, setSelectedCanvasItem, globalContextEditorRef, titleDraft, setTitleDraft, globalContextDraft, setGlobalContextDraft, contextSaveState, workspaceMode, setWorkspaceMode, arenaCompareMode, setArenaCompareMode, arenaSessionIds, arenaBranchKeys, memoryTitleDraft, setMemoryTitleDraft, memoryTypeDraft, setMemoryTypeDraft, memoryContentDraft, setMemoryContentDraft, memoryActionState, memoryActionMessage, selectedContextSourceIds, inspectorTab, setInspectorTab, memberEmailDraft, setMemberEmailDraft, memberRoleDraft, setMemberRoleDraft, memberActionState, memberActionMessage, shouldPreferArenaOnLoad, memberSessions, canEditProject, canManageProject, handleCommitTitle, handleOpenSession, handleExitProject, handleAddSession, handleRemoveSession, availableSessions, attachedMemoryItems, availableMemoryItems, attachedMemoryGroups, availableMemoryGroups, arenaBranchCatalog, toggleArenaSession, toggleArenaBranch, aggregateStats, globalContextPreview, projectView, arenaEntries, arenaSummary, selectedMemoryItem, selectedMergeMemory, projectContextSources, selectedProjectContextSources, projectContextBuilderDraft, selectedArenaCount, inspectorTabMeta, handleAppendArenaSummary, handlePromoteArenaWinner, handleSaveArenaSummaryAsMemory, handleCreateArenaMergeNode, handleSeedTypedNodeFromArena, handleSeedTypedNodeFromCanvasFocus, handleCreateTypedNode, handleAttachMemory, handleDetachMemory, handleDeleteMemory, handleReplaceGlobalContextWithMerge, handleAppendMergeToGlobalContext, handleAppendSelectedMemoryToGlobalContext, toggleProjectContextSource, handleSelectDefaultContextSources, handleSelectAllContextSources, handleClearContextSources, handleReplaceGlobalContextWithBuilder, handleAppendBuilderToGlobalContext, handleEditGlobalContext, handleSaveProjectMember, handleRemoveProjectMember, handleChangeProjectMemberRole, } = props;
+    const { activeProject, isMemoryReady, selectedCanvasItem, setSelectedCanvasItem, globalContextEditorRef, titleDraft, setTitleDraft, globalContextDraft, setGlobalContextDraft, contextSaveState, workspaceMode, setWorkspaceMode, arenaCompareMode, setArenaCompareMode, arenaSessionIds, arenaBranchKeys, memoryTitleDraft, setMemoryTitleDraft, memoryTypeDraft, setMemoryTypeDraft, memoryContentDraft, setMemoryContentDraft, memoryActionState, memoryActionMessage, selectedContextSourceIds, inspectorTab, setInspectorTab, memberEmailDraft, setMemberEmailDraft, memberRoleDraft, setMemberRoleDraft, memberActionState, memberActionMessage, shouldPreferArenaOnLoad, memberSessions, canEditProject, canManageProject, handleCommitTitle, handleOpenSession, handleExitProject, handleRefreshCanvas, isRefreshingCanvas, handleAddSession, handleRemoveSession, availableSessions, attachedMemoryItems, availableMemoryItems, attachedMemoryGroups, availableMemoryGroups, arenaBranchCatalog, toggleArenaSession, toggleArenaBranch, aggregateStats, globalContextPreview, projectView, arenaEntries, arenaSummary, selectedMemoryItem, selectedMergeMemory, projectContextSources, selectedProjectContextSources, projectContextBuilderDraft, selectedArenaCount, inspectorTabMeta, handleAppendArenaSummary, handlePromoteArenaWinner, handleSaveArenaSummaryAsMemory, handleCreateArenaMergeNode, handleSeedTypedNodeFromArena, handleSeedTypedNodeFromCanvasFocus, handleCreateTypedNode, handleAttachMemory, handleDetachMemory, handleDeleteMemory, handleReplaceGlobalContextWithMerge, handleAppendMergeToGlobalContext, handleAppendSelectedMemoryToGlobalContext, toggleProjectContextSource, handleSelectDefaultContextSources, handleSelectAllContextSources, handleClearContextSources, handleReplaceGlobalContextWithBuilder, handleAppendBuilderToGlobalContext, handleEditGlobalContext, handleSaveProjectMember, handleRemoveProjectMember, handleChangeProjectMemberRole, } = props;
     return (<div className="flex h-full min-h-0 overflow-hidden">
       <div className="flex w-[380px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-border/60 bg-muted/20 px-4 py-4">
         <ProjectSectionCard title="Project Overview" description="Projects aggregate multiple saved sessions into one persistent canvas.">
@@ -699,6 +699,17 @@ export function ProjectWorkspaceView(props: ProjectWorkspaceViewProps) {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label="Refresh project canvas"
+                title="Refresh project canvas"
+                onClick={() => void handleRefreshCanvas()}
+                disabled={isRefreshingCanvas}
+              >
+                <RefreshCw className={`h-4 w-4 ${isRefreshingCanvas ? "animate-spin" : ""}`} />
+              </Button>
               <Button type="button" variant={workspaceMode === "canvas" ? "default" : "outline"} size="sm" onClick={() => setWorkspaceMode("canvas")}>
                 Canvas
               </Button>
