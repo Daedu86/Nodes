@@ -70,7 +70,15 @@ export async function GET(req: Request) {
     const workspaceConfigured = workspaceId
       ? readiness.workspaceIds.includes(workspaceId)
       : readiness.hasDefaultWorkspace || readiness.workspaceCount > 0;
-    const { workspaceIds: _workspaceIds, ...safeReadiness } = readiness;
+    const safeReadiness = {
+      reachable: readiness.reachable,
+      ok: readiness.ok,
+      codexRunning: readiness.codexRunning,
+      authenticated: readiness.authenticated,
+      model: readiness.model,
+      workspaceCount: readiness.workspaceCount,
+      hasDefaultWorkspace: readiness.hasDefaultWorkspace,
+    };
 
     return NextResponse.json({
       configured: true,
