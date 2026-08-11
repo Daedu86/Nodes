@@ -1,24 +1,17 @@
 "use client";
 
-import { normalizeMessageContent } from "@/lib/llm/messages";
 import type { ProjectMemoryItem } from "@/lib/memory-documents";
-import {
-  PROJECT_MEMORY_META,
-  PROJECT_MEMORY_TYPE_ORDER,
-} from "@/lib/project-memory-meta";
-import { PROJECT_MAP_FILENAME, type ProjectDocument } from "@/lib/project-documents";
-import { parseProjectMapNodes } from "@/lib/project-map";
+import type { ProjectDocument } from "@/lib/project-documents";
+import { buildLegacyProjectMap, normalizeProjectMap } from "@/lib/project-map";
 import type { SessionDocument } from "@/lib/session-documents";
 import { getSessionTreeStats } from "@/lib/session-context";
-import {
-  layoutThreadGraphFlow,
-} from "@/components/assistant-ui/thread-graph-flow/thread-graph-layout";
+import { layoutThreadGraphFlow } from "@/components/assistant-ui/thread-graph-flow/thread-graph-layout";
 import type {
   ThreadGraphFlowEdge,
   ThreadGraphFlowNode,
 } from "@/components/assistant-ui/thread-graph-flow/thread-graph-flow-types";
 
-const SESSION_SWATCHES = [
+const WORKLOAD_SWATCHES = [
   "#2563eb",
   "#0f766e",
   "#7c3aed",
@@ -28,305 +21,111 @@ const SESSION_SWATCHES = [
   "#9333ea",
   "#0891b2",
 ];
-const PROJECT_MAP_ACCENT = "#d97706";
-const PROJECT_MAP_NODE_ACCENT = "#f59e0b";
+
+const STATUS_ACCENTS: Record<string, string> = {
+  active: "#0284c7",
+  blocked: "#dc2626",
+  complete: "#16a34a",
+  planned: "#64748b",
+  ready: "#7c3aed",
+};
 
 const formatSessionTitle = (title: string | null) => title?.trim() || "Untitled Session";
 
-const normalizeMatchText = (value: string) =>
-  value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const makeWorkloadNodeId = (projectId: string, mapNodeId: string) =>
+  `project:${projectId}:workload:${mapNodeId}`;
 
-const getMessageId = (value: unknown, fallback: string) =>
-  typeof value === "string" && value.length > 0 ? value : fallback;
-
-const getMessageRole = (value: unknown) =>
-  typeof value === "string" && value.length > 0 ? value : "message";
-
-const getCustomMetadata = (value: unknown) => {
-  if (typeof value !== "object" || value === null) return {};
-  const metadata = value as { metadata?: { custom?: Record<string, unknown> } };
-  return metadata.metadata?.custom ?? {};
-};
-
-const makeSessionNodeId = (projectId: string, sessionId: string) =>
-  `project:${projectId}:session:${sessionId}`;
-
-const makeMessageNodeId = (projectId: string, sessionId: string, messageId: string) =>
-  `project:${projectId}:session:${sessionId}:message:${messageId}`;
-
-const makeContextNodeId = (projectId: string) => `project:${projectId}:context`;
-const makeMapNodeId = (projectId: string, mapNodeId: string) =>
-  `project:${projectId}:map-node:${mapNodeId}`;
-const makeMemoryNodeId = (projectId: string, memoryId: string) => `project:${projectId}:memory:${memoryId}`;
-
-const resolveMemorySourceNodeIds = (
-  projectId: string,
-  memoryItem: ProjectMemoryItem,
-) => {
-  if (memoryItem.sourceKind === "session") {
-    return memoryItem.sourceKeys.map((sessionId) => makeSessionNodeId(projectId, sessionId));
-  }
-  if (memoryItem.sourceKind === "branch") {
-    return memoryItem.sourceKeys
-      .map((sourceKey) => {
-        const [sessionId, messageId] = sourceKey.split(":");
-        if (!sessionId || !messageId) return null;
-        return makeMessageNodeId(projectId, sessionId, messageId);
-      })
-      .filter((value): value is string => Boolean(value));
-  }
-  return [];
+const summarizeNodeSessions = (sessions: SessionDocument[]) => {
+  if (sessions.length === 0) return "No sessions yet";
+  const messageCount = sessions.reduce(
+    (total, session) => total + getSessionTreeStats(session.snapshot).messageCount,
+    0,
+  );
+  const artifactCount = sessions.reduce(
+    (total, session) =>
+      total + session.artifacts.filter((artifact) => artifact.artifactType !== "prompt").length,
+    0,
+  );
+  return `${sessions.length} session${sessions.length === 1 ? "" : "s"} · ${messageCount} messages · ${artifactCount} artifacts`;
 };
 
 export function buildProjectCanvasFlow(
   project: ProjectDocument,
   sessions: SessionDocument[],
-  memoryItems: ProjectMemoryItem[] = [],
+  _memoryItems: ProjectMemoryItem[] = [],
 ) {
   const nodes: ThreadGraphFlowNode[] = [];
   const edges: ThreadGraphFlowEdge[] = [];
-  const orderedSessions = project.sessionIds
-    .map((sessionId) => sessions.find((session) => session.id === sessionId))
-    .filter((session): session is SessionDocument => Boolean(session));
-  const projectMapNodes = parseProjectMapNodes(project.globalContext);
+  const sessionById = new Map(sessions.map((session) => [session.id, session] as const));
+  const sessionTitleById = new Map(
+    sessions.map((session) => [session.id, session.title] as const),
+  );
+  const persistedMap = normalizeProjectMap(project.map);
+  const map = persistedMap.nodes.length > 0
+    ? persistedMap
+    : buildLegacyProjectMap(project.sessionIds, sessionTitleById);
 
-  const globalContextNodeId = makeContextNodeId(project.id);
-  const memoryLaneCounts = new Map<string, number>();
-  const mergeLaneIndexRef = { value: 0 };
-  nodes.push({
-    id: globalContextNodeId,
-    type: "artifactNode",
-    position: { x: 64, y: 64 },
-    data: {
-      accent: PROJECT_MAP_ACCENT,
-      artifactType: "text",
-      kind: "root",
-      linkedArtifactCount: projectMapNodes.length,
-      preview:
-        projectMapNodes.length > 0
-          ? `${PROJECT_MAP_FILENAME} is the canonical project index. It currently defines ${projectMapNodes.length} workload nodes.`
-          : project.globalContext,
-      role: "project map",
-      statusLabel: `${PROJECT_MAP_FILENAME} · base of project`,
-      title: project.title?.trim() ? `${project.title} Map` : "Project Map",
-    },
-  });
+  map.nodes.forEach((mapNode, index) => {
+    const nodeSessions = mapNode.sessionIds
+      .map((sessionId) => sessionById.get(sessionId))
+      .filter((session): session is SessionDocument => Boolean(session));
+    const primarySession = mapNode.primarySessionId
+      ? sessionById.get(mapNode.primarySessionId) ?? null
+      : nodeSessions[0] ?? null;
+    const output = mapNode.selectedOutput;
+    const accent = STATUS_ACCENTS[mapNode.status]
+      ?? WORKLOAD_SWATCHES[index % WORKLOAD_SWATCHES.length]
+      ?? "#2563eb";
+    const description = mapNode.description.trim();
+    const outputPreview = output?.summary.trim()
+      ? `Output: ${output.summary.trim()}`
+      : output
+        ? `Output selected from ${formatSessionTitle(sessionById.get(output.sessionId)?.title ?? null)}`
+        : "No output selected yet";
 
-  projectMapNodes.forEach((mapNode, mapNodeIndex) => {
-    const mapNodeId = makeMapNodeId(project.id, mapNode.id);
     nodes.push({
-      id: mapNodeId,
+      id: makeWorkloadNodeId(project.id, mapNode.id),
       type: "threadNode",
       position: { x: 0, y: 0 },
       data: {
-        accent: PROJECT_MAP_NODE_ACCENT,
-        depth: mapNodeIndex + 1,
-        idx: mapNodeIndex,
+        accent,
+        idx: index,
         kind: "message",
-        preview: `Workload/thinking unit ${mapNodeIndex + 1} of ${projectMapNodes.length}. Sessions and runs execute work underneath this project-map node; their outputs can feed downstream map nodes.`,
-        role: "map node",
-        statusLabel: "project workload node",
-        title: `${String(mapNodeIndex + 1).padStart(2, "0")}. ${mapNode.title}`,
+        mapNodeId: mapNode.id,
+        messageId: output?.messageId ?? null,
+        preview: [
+          description || "Workload / thinking node",
+          summarizeNodeSessions(nodeSessions),
+          outputPreview,
+        ].join("\n\n"),
+        role: "workload",
+        sessionId: primarySession?.id ?? null,
+        sessionIds: mapNode.sessionIds,
+        sessionTitle:
+          nodeSessions.length === 0
+            ? null
+            : nodeSessions.length === 1
+              ? formatSessionTitle(nodeSessions[0]!.title)
+              : `${nodeSessions.length} sessions`,
+        statusLabel: mapNode.status,
+        title: mapNode.title,
       },
     });
+  });
 
-    const previousNodeId =
-      mapNodeIndex === 0
-        ? globalContextNodeId
-        : makeMapNodeId(project.id, projectMapNodes[mapNodeIndex - 1].id);
+  map.edges.forEach((mapEdge) => {
+    const sourceNode = map.nodes.find((node) => node.id === mapEdge.sourceNodeId);
+    if (!sourceNode) return;
     edges.push({
-      id: `${previousNodeId}=>${mapNodeId}`,
-      source: previousNodeId,
-      target: mapNodeId,
+      id: `project:${project.id}:edge:${mapEdge.id}`,
+      source: makeWorkloadNodeId(project.id, mapEdge.sourceNodeId),
+      target: makeWorkloadNodeId(project.id, mapEdge.targetNodeId),
       type: "threadEdge",
       data: {
-        accent: PROJECT_MAP_NODE_ACCENT,
-        label: mapNodeIndex === 0 ? "map start" : "next workload",
+        accent: sourceNode.selectedOutput ? "#16a34a" : "#64748b",
+        label: mapEdge.label ?? (sourceNode.selectedOutput ? "output" : "depends on"),
         tone: "default",
       },
-    });
-  });
-
-  memoryItems.forEach((memoryItem) => {
-    const memoryNodeId = makeMemoryNodeId(project.id, memoryItem.id);
-    const sourceSession = memoryItem.sourceSessionId
-      ? orderedSessions.find((session) => session.id === memoryItem.sourceSessionId) ?? null
-      : null;
-    const memoryMeta = PROJECT_MEMORY_META[memoryItem.type];
-    const laneIndex = PROJECT_MEMORY_TYPE_ORDER.indexOf(memoryItem.type);
-    const laneCount = memoryLaneCounts.get(memoryItem.type) ?? 0;
-    memoryLaneCounts.set(memoryItem.type, laneCount + 1);
-    const position =
-      memoryItem.type === "merge"
-        ? { x: -560, y: 72 + mergeLaneIndexRef.value++ * 240 }
-        : {
-            x: -900,
-            y: 56 + Math.max(0, laneIndex) * 176 + laneCount * 44,
-          };
-
-    nodes.push({
-      id: memoryNodeId,
-      type: "artifactNode",
-      position,
-      data: {
-        accent:
-          memoryItem.type === "merge"
-            ? memoryMeta.accent
-            : sourceSession
-              ? SESSION_SWATCHES[orderedSessions.findIndex((session) => session.id === sourceSession.id) % SESSION_SWATCHES.length]
-              : memoryMeta.accent,
-        artifactType: "text",
-        kind: "artifact",
-        memoryId: memoryItem.id,
-        memoryType: memoryItem.type,
-        preview: memoryItem.content,
-        role: "memory",
-        sessionId: memoryItem.sourceSessionId,
-        sessionTitle: sourceSession ? formatSessionTitle(sourceSession.title) : null,
-        statusLabel:
-          memoryItem.type === "merge"
-            ? "merge node"
-            : sourceSession
-              ? `${memoryMeta.label.toLowerCase()} · linked session`
-              : `${memoryMeta.label.toLowerCase()} · library`,
-        title: memoryItem.title,
-      },
-    });
-
-    edges.push({
-      id: `${memoryNodeId}=>${globalContextNodeId}`,
-      source: memoryNodeId,
-      target: globalContextNodeId,
-      type: "threadEdge",
-      data: {
-        accent: memoryMeta.accent,
-        label: memoryMeta.label.toLowerCase(),
-        tone: "context",
-      },
-    });
-
-    if (memoryItem.type === "merge") {
-      resolveMemorySourceNodeIds(project.id, memoryItem).forEach((sourceNodeId) => {
-        edges.push({
-          id: `${sourceNodeId}=>${memoryNodeId}`,
-          source: sourceNodeId,
-          target: memoryNodeId,
-          type: "threadEdge",
-          data: {
-            accent: "#d97706",
-            label: "merge",
-            tone: "edited",
-          },
-        });
-      });
-    }
-  });
-
-  orderedSessions.forEach((session, sessionIndex) => {
-    const isArenaWinner = project.arenaWinnerSessionId === session.id;
-    const sessionColor = isArenaWinner
-      ? "#d97706"
-      : SESSION_SWATCHES[sessionIndex % SESSION_SWATCHES.length] ?? "#2563eb";
-    const sessionNodeId = makeSessionNodeId(project.id, session.id);
-    const sessionStats = getSessionTreeStats(session.snapshot);
-    const sessionTitle = formatSessionTitle(session.title);
-    const normalizedSessionTitle = normalizeMatchText(sessionTitle);
-    const matchedMapNode = projectMapNodes.find((mapNode) => {
-      const normalizedMapTitle = normalizeMatchText(mapNode.title);
-      return normalizedSessionTitle.length >= 4 &&
-        (normalizedMapTitle.includes(normalizedSessionTitle) || normalizedSessionTitle.includes(normalizedMapTitle));
-    });
-    const workloadParentId = matchedMapNode
-      ? makeMapNodeId(project.id, matchedMapNode.id)
-      : globalContextNodeId;
-
-    nodes.push({
-      id: sessionNodeId,
-      type: "threadNode",
-      position: { x: 0, y: 0 },
-      data: {
-        accent: sessionColor,
-        idx: sessionIndex,
-        kind: "message",
-        preview: [
-          isArenaWinner ? "Arena winner" : null,
-          matchedMapNode ? `Workload: ${matchedMapNode.title}` : "Project-level workload history",
-          `${sessionStats.messageCount} messages`,
-          `${sessionStats.rootCount} root branches`,
-          `${sessionStats.siblingGroups} branching points`,
-          `${session.artifacts.filter((artifact) => artifact.artifactType !== "prompt").length} artifacts`,
-        ].filter(Boolean).join(" · "),
-        role: "workload session",
-        sessionId: session.id,
-        sessionTitle,
-        statusLabel: isArenaWinner ? "Arena winner" : "execution history",
-        title: sessionTitle,
-      },
-    });
-
-    edges.push({
-      id: `${workloadParentId}=>${sessionNodeId}`,
-      source: workloadParentId,
-      target: sessionNodeId,
-      type: "threadEdge",
-      data: {
-        accent: sessionColor,
-        label: matchedMapNode ? "session / run" : "project session",
-        tone: "context",
-      },
-    });
-
-    session.snapshot.messages.forEach((entry, messageIndex) => {
-      const message = entry.message ?? {};
-      const messageId = getMessageId(
-        (message as { id?: unknown }).id,
-        `message-${messageIndex + 1}`,
-      );
-      const isBranchWinner = project.arenaWinnerBranchKey === `${session.id}:${messageId}`;
-      const messageNodeId = makeMessageNodeId(project.id, session.id, messageId);
-      const normalizedContent =
-        normalizeMessageContent((message as { parts?: unknown }).parts) ??
-        normalizeMessageContent((message as { content?: unknown }).content);
-      const metadataCustom = getCustomMetadata(message);
-
-      nodes.push({
-        id: messageNodeId,
-        type: "threadNode",
-        position: { x: 0, y: 0 },
-        data: {
-          accent: isBranchWinner ? "#d97706" : sessionColor,
-          idx: messageIndex,
-          kind: "message",
-          linkedArtifactCount: session.contextLinks.filter((link) => link.targetMessageId === messageId).length,
-          messageId,
-          model: typeof metadataCustom.model === "string" ? metadataCustom.model : null,
-          preview:
-            normalizedContent?.content.trim() ||
-            (getMessageRole((message as { role?: unknown }).role) === "assistant"
-              ? "Assistant message with no text preview."
-              : "User message with no text preview."),
-          provider: typeof metadataCustom.provider === "string" ? metadataCustom.provider : null,
-          role: getMessageRole((message as { role?: unknown }).role),
-          sessionId: session.id,
-          sessionTitle,
-          statusLabel: isBranchWinner ? "Arena winner" : null,
-          title: sessionTitle,
-        },
-      });
-
-      const parentNodeId = entry.parentId
-        ? makeMessageNodeId(project.id, session.id, entry.parentId)
-        : sessionNodeId;
-      edges.push({
-        id: `${parentNodeId}=>${messageNodeId}`,
-        source: parentNodeId,
-        target: messageNodeId,
-        type: "threadEdge",
-        data: {
-          accent: sessionColor,
-          tone: "default",
-        },
-      });
     });
   });
 
