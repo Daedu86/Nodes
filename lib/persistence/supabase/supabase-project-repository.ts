@@ -4,6 +4,7 @@ import type {
   ProjectRepository,
 } from "@/lib/persistence/project-repository";
 import type { ProjectSummary } from "@/lib/project-documents";
+import { getProjectMapSessionIds, normalizeProjectMap } from "@/lib/project-map";
 import { getSupabasePersistenceClient } from "@/lib/persistence/supabase/client";
 import {
   ensureData,
@@ -19,6 +20,7 @@ const projectSelect = `
   owner_id,
   title,
   global_context,
+  map_json,
   arena_winner_session_id,
   arena_winner_branch_key,
   created_at,
@@ -178,9 +180,13 @@ export const supabaseProjectRepository: ProjectRepository = {
   async createProject(input = {}) {
     const client = getSupabasePersistenceClient();
     const ownerId = requireOwnerId(input.ownerId);
-    const sessionIds = Array.isArray(input.sessionIds)
-      ? [...new Set(input.sessionIds.filter((entry): entry is string => typeof entry === "string" && entry.length > 0))]
-      : [];
+    const map = normalizeProjectMap(input.map);
+    const mapSessionIds = getProjectMapSessionIds(map);
+    const sessionIds = map.nodes.length > 0
+      ? mapSessionIds
+      : Array.isArray(input.sessionIds)
+        ? [...new Set(input.sessionIds.filter((entry): entry is string => typeof entry === "string" && entry.length > 0))]
+        : [];
     const memoryIds = Array.isArray(input.memoryIds)
       ? [...new Set(input.memoryIds.filter((entry): entry is string => typeof entry === "string" && entry.length > 0))]
       : [];
@@ -190,6 +196,7 @@ export const supabaseProjectRepository: ProjectRepository = {
         owner_id: ownerId,
         title: typeof input.title === "string" && input.title.trim().length > 0 ? input.title.trim() : null,
         global_context: typeof input.globalContext === "string" ? input.globalContext : "",
+        map_json: map,
       })
       .select("id")
       .single();
@@ -202,12 +209,18 @@ export const supabaseProjectRepository: ProjectRepository = {
   async patchProject(projectId, patch, ownerId) {
     const client = getSupabasePersistenceClient();
     const update: Record<string, unknown> = {};
+    let mapSessionIds: string[] | null = null;
     if (patch.title !== undefined) {
       update.title = typeof patch.title === "string" && patch.title.trim().length > 0 ? patch.title.trim() : null;
     }
     if (patch.globalContext !== undefined) update.global_context = patch.globalContext;
     if (patch.arenaWinnerBranchKey !== undefined) update.arena_winner_branch_key = patch.arenaWinnerBranchKey;
     if (patch.arenaWinnerSessionId !== undefined) update.arena_winner_session_id = patch.arenaWinnerSessionId;
+    if (patch.map !== undefined) {
+      const map = normalizeProjectMap(patch.map);
+      update.map_json = map;
+      mapSessionIds = getProjectMapSessionIds(map);
+    }
     if (Object.keys(update).length > 0) {
       const { error } = await client
         .from("projects")
@@ -216,7 +229,9 @@ export const supabaseProjectRepository: ProjectRepository = {
         .eq("owner_id", requireOwnerId(ownerId));
       if (error) throw new Error(error.message || "Failed to update project");
     }
-    if (patch.sessionIds !== undefined) {
+    if (mapSessionIds !== null) {
+      await replaceProjectSessionLinks(projectId, mapSessionIds);
+    } else if (patch.sessionIds !== undefined) {
       await replaceProjectSessionLinks(projectId, [...new Set(patch.sessionIds.filter((entry): entry is string => typeof entry === "string" && entry.length > 0))]);
     }
     if (patch.memoryIds !== undefined) {
