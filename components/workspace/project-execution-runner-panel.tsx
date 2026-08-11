@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { createPortal } from "react-dom";
 import {
   CheckCircle2,
   CircleAlert,
@@ -103,6 +104,7 @@ export function ProjectExecutionRunnerPanel({
   const [message, setMessage] = React.useState<string | null>(null);
   const [pendingLaunch, setPendingLaunch] = React.useState<PendingLaunch | null>(null);
   const [managedLocalId, setManagedLocalId] = React.useState<string | null>(null);
+  const [headerActions, setHeaderActions] = React.useState<HTMLElement | null>(null);
 
   const projectMap = React.useMemo(() => normalizeProjectMap(project.map), [project.map]);
   const selectedNode = React.useMemo(() => {
@@ -139,6 +141,20 @@ export function ProjectExecutionRunnerPanel({
       pendingLaunch ||
       (managedData?.agentStatus && !["completed", "failed", "cancelled"].includes(managedData.agentStatus)),
   );
+
+  React.useEffect(() => {
+    const syncHeaderActions = () => {
+      const refreshButton = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="Refresh project canvas"]',
+      );
+      setHeaderActions(refreshButton?.parentElement ?? null);
+    };
+
+    syncHeaderActions();
+    const observer = new MutationObserver(syncHeaderActions);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
 
   React.useEffect(() => {
     setManagedLocalId(null);
@@ -275,20 +291,24 @@ export function ProjectExecutionRunnerPanel({
 
   if (project.accessRole !== "owner") return null;
 
+  const runnerTrigger = (
+    <SheetTrigger asChild>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className={headerActions ? "gap-2" : "absolute right-4 top-4 z-30 gap-2 bg-background/95 shadow-sm backdrop-blur"}
+        aria-label="Open execution runner"
+      >
+        <PanelRightOpen className="h-4 w-4" />
+        Runner
+      </Button>
+    </SheetTrigger>
+  );
+
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="absolute right-4 top-4 z-30 gap-2 bg-background/95 shadow-sm backdrop-blur"
-          aria-label="Open execution runner"
-        >
-          <PanelRightOpen className="h-4 w-4" />
-          Runner
-        </Button>
-      </SheetTrigger>
+      {headerActions ? createPortal(runnerTrigger, headerActions) : runnerTrigger}
 
       <SheetContent side="right" className="w-[min(440px,94vw)] gap-0 p-0 sm:max-w-[440px]">
         <SheetHeader className="border-b border-border/60 px-4 py-4 pr-12">
