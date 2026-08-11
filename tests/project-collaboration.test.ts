@@ -166,7 +166,7 @@ describe("project collaboration", () => {
     await expect(
       patchProjectForUser(project.id, { sessionIds: ["session-1"] }, editor),
     ).rejects.toMatchObject({
-      message: "Only the project owner can change attached sessions or typed nodes.",
+      message: "Only the project owner can change the project map, attached sessions, or typed nodes.",
       status: 403,
     });
   });
