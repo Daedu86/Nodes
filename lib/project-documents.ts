@@ -1,4 +1,5 @@
 import type { ProjectMemoryItem } from "@/lib/memory-documents";
+import { createTitanicProjectMap } from "@/lib/project-map";
 import type { SessionDocument } from "@/lib/session-documents";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -8,6 +9,10 @@ export const PROJECT_MAP_FILENAME = "map.md";
 
 export const createDefaultProjectMap = (title: string | null = null) => {
   const projectTitle = title?.trim() || "Untitled Project";
+  if (/\btitanic\b/i.test(projectTitle)) {
+    return createTitanicProjectMap(projectTitle);
+  }
+
   return [
     `# ${projectTitle} — Project Map`,
     "",
