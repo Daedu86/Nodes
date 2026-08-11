@@ -65,8 +65,9 @@ const summarizeNodeSessions = (sessions: SessionDocument[]) => {
 export function buildProjectCanvasFlow(
   project: ProjectDocument,
   sessions: SessionDocument[],
-  _memoryItems: ProjectMemoryItem[] = [],
+  memoryItems: ProjectMemoryItem[] = [],
 ) {
+  void memoryItems;
   const nodes: ThreadGraphFlowNode[] = [];
   const edges: ThreadGraphFlowEdge[] = [];
   const sessionById = new Map(sessions.map((session) => [session.id, session] as const));
