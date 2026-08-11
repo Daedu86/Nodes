@@ -6,7 +6,7 @@ import {
   createProjectForUser,
   listProjectsForUser,
 } from "@/lib/project-collaboration";
-import { createDefaultProjectMap } from "@/lib/project-documents";
+import { filterProjectMapSessions, getProjectMapSessionIds } from "@/lib/project-map";
 import { listMemoryItems } from "@/lib/memory-store";
 import { listSessions } from "@/lib/session-store";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
@@ -15,6 +15,7 @@ import { recordAgentEvent } from "@/lib/server/agent-work";
 type CreateProjectBody = {
   memoryIds?: unknown;
   globalContext?: string;
+  map?: unknown;
   sessionIds?: unknown;
   title?: string | null;
 };
@@ -51,11 +52,14 @@ export async function POST(req: Request) {
   ]);
   const allowedSessionIds = new Set(sessions.map((session) => session.id));
   const allowedMemoryIds = new Set(memoryItems.map((item) => item.id));
-  const sessionIds = requestedSessionIds.filter((sessionId) => allowedSessionIds.has(sessionId));
+  const map = filterProjectMapSessions(body.map, allowedSessionIds);
+  const sessionIds = map.nodes.length > 0
+    ? getProjectMapSessionIds(map)
+    : requestedSessionIds.filter((sessionId) => allowedSessionIds.has(sessionId));
   const memoryIds = requestedMemoryIds.filter((memoryId) => allowedMemoryIds.has(memoryId));
-  const requestedMap = typeof body.globalContext === "string" ? body.globalContext.trim() : "";
   const project = await createProjectForUser({
-    globalContext: requestedMap || createDefaultProjectMap(body.title ?? null),
+    globalContext: typeof body.globalContext === "string" ? body.globalContext : "",
+    map,
     memoryIds,
     sessionIds,
     title: body.title ?? null,
@@ -72,7 +76,7 @@ export async function POST(req: Request) {
       method: "POST",
       route: "/api/projects",
       projectId: project.id,
-      payload: { sessionIds, memoryIds },
+      payload: { sessionIds, memoryIds, mapNodeCount: map.nodes.length },
     });
   }
   return Response.json({ project }, { status: 201 });
