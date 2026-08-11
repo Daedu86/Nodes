@@ -4,7 +4,7 @@
 }
 
 #projects-panel > div:last-child > div > button::after {
-  content: "map.md  ·  base of project";
+  content: "Project Map  ·  base of project";
   position: absolute;
   left: 0.55rem;
   bottom: 0.5rem;
