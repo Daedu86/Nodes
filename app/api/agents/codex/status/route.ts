@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type NextStep = {
-  code: "ready" | "configure_runner" | "start_runner" | "authenticate" | "configure_workspace";
+  code: "ready" | "configure_runner" | "start_runner" | "update_runner" | "authenticate" | "configure_workspace";
   title: string;
   detail: string;
   command?: string;
@@ -17,6 +17,7 @@ const nextStepFor = (
     codexRunning: boolean;
     authenticated: boolean;
     workspaceCount: number;
+    workspaceIdsSupported: boolean;
     hasDefaultWorkspace: boolean;
   },
   workspaceId: string | null,
@@ -35,6 +36,13 @@ const nextStepFor = (
       title: "Authenticate Codex on the runner machine",
       detail: "Authentication remains local to Codex. Nodes never stores your Codex or ChatGPT credentials.",
       command: "codex login",
+    };
+  }
+  if (workspaceId && !status.workspaceIdsSupported) {
+    return {
+      code: "update_runner",
+      title: "Update the local Codex Runner",
+      detail: "The connected runner predates exact project-workspace verification. Pull the latest Nodes-AI-Canvas on the runner machine and restart the runner, then use Check again.",
     };
   }
   if (workspaceId && !workspaceConfigured) {
@@ -68,7 +76,7 @@ export async function GET(req: Request) {
   try {
     const readiness = await getCodexRunnerReadiness(guarded.user.id);
     const workspaceConfigured = workspaceId
-      ? readiness.workspaceIds.includes(workspaceId)
+      ? readiness.workspaceIdsSupported && readiness.workspaceIds.includes(workspaceId)
       : readiness.hasDefaultWorkspace || readiness.workspaceCount > 0;
     const safeReadiness = {
       reachable: readiness.reachable,
