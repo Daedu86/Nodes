@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { AppTitleSync } from "@/components/app-title-sync";
 import { AuthSessionProvider } from "@/components/auth/auth-session-provider";
 import "./globals.css";
+import "./project-map-sidebar.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
