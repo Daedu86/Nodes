@@ -66,6 +66,7 @@ export type CodexRunnerReadiness = {
   model: string | null;
   workspaceCount: number;
   workspaceIds: string[];
+  workspaceIdsSupported: boolean;
   hasDefaultWorkspace: boolean;
 };
 
@@ -111,6 +112,7 @@ export async function getCodexRunnerReadiness(
     model: stringField(ready.model) ?? stringField(health.model),
     workspaceCount: numberField(ready.workspaceCount ?? health.workspaceCount),
     workspaceIds: stringArrayField(ready.workspaceIds),
+    workspaceIdsSupported: Array.isArray(ready.workspaceIds),
     hasDefaultWorkspace:
       ready.hasDefaultWorkspace === true || health.hasDefaultWorkspace === true,
   };
