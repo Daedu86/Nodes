@@ -25,12 +25,14 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import type { ProjectCanvasSelection } from "@/components/workspace/project-canvas";
+import { buildProjectExecutionPrompt } from "@/lib/agents/codex/project-execution-context";
 import type { ProjectDocument } from "@/lib/project-documents";
 import {
   buildProjectMapInputSummary,
   getProjectMapNode,
   normalizeProjectMap,
 } from "@/lib/project-map";
+import type { SessionDocument } from "@/lib/session-documents";
 
 type RunnerNextStep = {
   code: "ready" | "configure_runner" | "start_runner" | "authenticate" | "configure_workspace";
@@ -48,6 +50,7 @@ type RunnerStatus = {
   model: string | null;
   workspaceCount: number;
   hasDefaultWorkspace: boolean;
+  workspaceConfigured: boolean;
   nextStep: RunnerNextStep;
 };
 
@@ -96,6 +99,7 @@ export function ProjectExecutionRunnerPanel({
   const [open, setOpen] = React.useState(false);
   const [status, setStatus] = React.useState<RunnerStatus | null>(null);
   const [checking, setChecking] = React.useState(false);
+  const [preparing, setPreparing] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const [pendingLaunch, setPendingLaunch] = React.useState<PendingLaunch | null>(null);
   const [managedLocalId, setManagedLocalId] = React.useState<string | null>(null);
@@ -131,13 +135,15 @@ export function ProjectExecutionRunnerPanel({
   );
   const managedData = (managedNode?.data as ManagedAgentData | undefined) ?? null;
   const runBusy = Boolean(
-    pendingLaunch ||
+    preparing ||
+      pendingLaunch ||
       (managedData?.agentStatus && !["completed", "failed", "cancelled"].includes(managedData.agentStatus)),
   );
 
   React.useEffect(() => {
     setManagedLocalId(null);
     setPendingLaunch(null);
+    setPreparing(false);
     setMessage(null);
   }, [selectedSessionId]);
 
@@ -165,7 +171,7 @@ export function ProjectExecutionRunnerPanel({
     data.onAgentStart?.();
     setPendingLaunch(null);
     setMessage(
-      "Managed Codex run started. Output, approvals, cancellation, and reconnect state are attached to this session.",
+      "Managed Codex run started with the selected session artifacts/runbook. Output, approvals, cancellation, and reconnect state are attached to this session.",
     );
   }, [agentRunNodes, pendingLaunch]);
 
@@ -173,10 +179,13 @@ export function ProjectExecutionRunnerPanel({
     setChecking(true);
     setMessage(null);
     try {
-      const response = await fetch("/api/agents/codex/status", {
-        method: "GET",
-        cache: "no-store",
-      });
+      const response = await fetch(
+        `/api/agents/codex/status?workspaceId=${encodeURIComponent(project.id)}`,
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+      );
       const body = (await response.json().catch(() => null)) as RunnerStatus | null;
       if (!response.ok || !body) throw new Error(`Runner status failed: ${response.status}`);
       setStatus(body);
@@ -186,7 +195,7 @@ export function ProjectExecutionRunnerPanel({
     } finally {
       setChecking(false);
     }
-  }, []);
+  }, [project.id]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -195,9 +204,7 @@ export function ProjectExecutionRunnerPanel({
     return () => window.clearInterval(timer);
   }, [open, refreshStatus]);
 
-  // The existing managed Codex flow passes project.id as workspaceId. For project-scoped
-  // execution we therefore require an explicit runner allowlist mapping for this project.
-  const workspaceReady = Boolean(status && status.workspaceCount > 0);
+  const workspaceReady = Boolean(status?.workspaceConfigured);
   const canRun = Boolean(
     project.accessRole === "owner" &&
       status?.reachable &&
@@ -208,38 +215,43 @@ export function ProjectExecutionRunnerPanel({
       selectedSessionId,
   );
 
-  const effectiveNextStep = React.useMemo<RunnerNextStep | null>(() => {
-    if (!status) return null;
-    if (status.reachable && status.authenticated && status.workspaceCount === 0) {
-      return {
-        code: "configure_workspace",
-        title: "Map this project to a runner workspace",
-        detail: `Add this project id to CODEX_WORKSPACES_JSON on the runner: ${project.id}`,
-      };
-    }
-    return status.nextStep;
-  }, [project.id, status]);
+  const effectiveNextStep = status?.nextStep ?? null;
 
-  const runSelectedWorkload = React.useCallback(() => {
+  const runSelectedWorkload = React.useCallback(async () => {
     if (!selectedNode || !selectedSessionId || !canRun || runBusy) return;
-    setMessage(null);
-    const prompt = [
-      "Execute this Nodes project workload in the configured project workspace.",
-      `Project: ${project.title ?? project.id}`,
-      `Workload: ${selectedNode.title}`,
-      selectedNode.description ? `Objective: ${selectedNode.description}` : "",
-      upstreamSummary ? `Selected upstream outputs:\n${upstreamSummary}` : "",
-      "Use the repository/workspace as the source of truth. Preserve useful outputs as files/artifacts and report what was executed, verified, and what remains blocked. Do not expose local credentials or authentication files.",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+    setPreparing(true);
+    setMessage("Loading the selected session artifacts and execution runbook…");
 
-    setPendingLaunch({
-      existingIds: new Set(agentRunNodes.map((node) => node.id)),
-      prompt,
-      stage: "await-node",
-    });
-    managedRuns.addAgent();
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(selectedSessionId)}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+      const body = (await response.json().catch(() => null)) as { session?: SessionDocument } | null;
+      if (!response.ok || !body?.session) {
+        throw new Error(`Unable to load execution session (${response.status}).`);
+      }
+
+      const prompt = buildProjectExecutionPrompt({
+        projectId: project.id,
+        projectTitle: project.title ?? project.id,
+        workloadTitle: selectedNode.title,
+        workloadDescription: selectedNode.description,
+        upstreamSummary,
+        artifacts: body.session.artifacts,
+      });
+
+      setPendingLaunch({
+        existingIds: new Set(agentRunNodes.map((node) => node.id)),
+        prompt,
+        stage: "await-node",
+      });
+      managedRuns.addAgent();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to prepare the workload execution context.");
+    } finally {
+      setPreparing(false);
+    }
   }, [
     agentRunNodes,
     canRun,
@@ -347,6 +359,9 @@ export function ProjectExecutionRunnerPanel({
                   <span className="rounded-full border border-border/60 px-2 py-1">status: {selectedNode.status}</span>
                   <span className="rounded-full border border-border/60 px-2 py-1">session: {selectedSessionId ? selectedSessionId.slice(0, 8) : "none"}</span>
                 </div>
+                <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
+                  Primary-session artifacts are loaded fresh when the run starts and become authoritative execution context.
+                </p>
               </div>
             ) : (
               <p className="mt-2 text-sm leading-6 text-muted-foreground">Select a workload node on the Canvas. The runner acts only on the selected workload and its attached primary session.</p>
@@ -357,7 +372,7 @@ export function ProjectExecutionRunnerPanel({
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Runner workspace key</p>
             <code className="mt-2 block overflow-x-auto rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-xs">{project.id}</code>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              Managed project runs use the project id as the workspace key. Configure this key in the runner-owned CODEX_WORKSPACES_JSON allowlist; no filesystem path is accepted from the browser.
+              Managed project runs use the project id as the workspace key. The runner now verifies this exact key in CODEX_WORKSPACES_JSON; no filesystem path is accepted from the browser.
             </p>
           </section>
 
@@ -410,13 +425,13 @@ export function ProjectExecutionRunnerPanel({
         </div>
 
         <SheetFooter className="border-t border-border/60 p-4">
-          <Button type="button" className="w-full gap-2" disabled={!canRun || runBusy} onClick={runSelectedWorkload}>
+          <Button type="button" className="w-full gap-2" disabled={!canRun || runBusy} onClick={() => void runSelectedWorkload()}>
             {runBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            {runBusy ? "Workload active…" : "Run selected workload"}
+            {preparing ? "Preparing context…" : runBusy ? "Workload active…" : "Run selected workload"}
           </Button>
           {!canRun ? (
             <p className="text-center text-[11px] leading-4 text-muted-foreground">
-              Run unlocks after runner + authentication + project workspace mapping + selected session are ready.
+              Run unlocks after runner + authentication + exact project workspace mapping + selected session are ready.
             </p>
           ) : null}
         </SheetFooter>
