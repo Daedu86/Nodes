@@ -1,0 +1,136 @@
+name: BenchFlow Node 02 Oracle Smoke
+
+on:
+  push:
+    branches:
+      - benchflow/node-02-oracle-smoke
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out pinned SkillsBench
+        uses: actions/checkout@v4
+        with:
+          repository: benchflow-ai/skillsbench
+          ref: 9a1f4dd5f7659f75707435da3ce854b6e48321d1
+          path: skillsbench
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        run: python -m pip install 'uv==0.10.0'
+
+      - name: Record environment
+        run: |
+          {
+            echo '# BenchFlow Node 02 — Oracle Smoke Evidence'
+            echo
+            echo "- SkillsBench commit: 9a1f4dd5f7659f75707435da3ce854b6e48321d1"
+            echo "- Runner: GitHub Actions ubuntu-latest"
+            echo "- Sandbox: Docker"
+            echo "- Agent: oracle (no LLM)"
+            echo "- UTC start: $(date -u +%FT%TZ)"
+            echo
+            echo '## Runtime versions'
+            echo '```text'
+            python --version
+            uv --version
+            git --version
+            docker --version
+            echo '```'
+          } | tee benchflow-node02-summary.md
+
+      - name: Install pinned SkillsBench environment
+        working-directory: skillsbench
+        run: uv sync --locked
+
+      - name: Validate task package
+        working-directory: skillsbench
+        run: |
+          uv run bench --version | tee -a ../benchflow-node02.log
+          uv run bench tasks check tasks/offer-letter-generator 2>&1 | tee -a ../benchflow-node02.log
+
+      - name: Run oracle smoke in Docker
+        working-directory: skillsbench
+        run: |
+          rm -rf ../benchflow-node02-jobs
+          uv run bench eval run \
+            --tasks-dir tasks/offer-letter-generator \
+            --agent oracle \
+            --sandbox docker \
+            --jobs-dir ../benchflow-node02-jobs \
+            --concurrency 1 \
+            2>&1 | tee -a ../benchflow-node02.log
+
+      - name: Verify reward equals 1
+        run: |
+          python - <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          root = pathlib.Path('benchflow-node02-jobs')
+          files = sorted(root.rglob('result.json'))
+          if not files:
+              print('No result.json files were produced.', file=sys.stderr)
+              sys.exit(2)
+
+          rewards = []
+          def visit(value, path=''):
+              if isinstance(value, dict):
+                  for key, child in value.items():
+                      child_path = f'{path}.{key}' if path else key
+                      if key == 'reward' and isinstance(child, (int, float)):
+                          rewards.append((child_path, float(child)))
+                      visit(child, child_path)
+              elif isinstance(value, list):
+                  for index, child in enumerate(value):
+                      visit(child, f'{path}[{index}]')
+
+          print('Result files:')
+          for file in files:
+              print(f'- {file}')
+              data = json.loads(file.read_text(encoding='utf-8'))
+              visit(data)
+              print(json.dumps(data, indent=2, ensure_ascii=False))
+
+          print('Rewards found:', rewards)
+          if not any(abs(value - 1.0) < 1e-12 for _, value in rewards):
+              print('Completion gate failed: no numeric reward == 1 found.', file=sys.stderr)
+              sys.exit(3)
+          PY
+
+      - name: Finalize evidence summary
+        if: always()
+        run: |
+          {
+            echo
+            echo '## Produced files'
+            echo '```text'
+            find benchflow-node02-jobs -type f -print 2>/dev/null | sort || true
+            echo '```'
+            echo
+            echo "- UTC finish: $(date -u +%FT%TZ)"
+            echo "- Workflow conclusion is recorded by GitHub Actions."
+          } >> benchflow-node02-summary.md
+
+      - name: Upload Node 02 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchflow-node02-oracle-smoke
+          path: |
+            benchflow-node02-summary.md
+            benchflow-node02.log
+            benchflow-node02-jobs/
+          if-no-files-found: warn
+          retention-days: 7
