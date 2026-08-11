@@ -58,6 +58,41 @@ const readRunnerError = async (response: Response) => {
   return fallback;
 };
 
+export type CodexRunnerReadiness = {
+  ok: boolean;
+  codexRunning: boolean;
+  authenticated: boolean;
+  model: string | null;
+  workspaceCount: number;
+  hasDefaultWorkspace: boolean;
+};
+
+export async function getCodexRunnerReadiness(
+  ownerId: string,
+): Promise<CodexRunnerReadiness> {
+  const response = await runnerFetch(ownerId, "/readyz", {
+    method: "GET",
+    signal: AbortSignal.timeout(8_000),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readRunnerError(response));
+  }
+
+  const body = (await response.json()) as Record<string, unknown>;
+  return {
+    ok: body.ok === true,
+    codexRunning: body.codexRunning === true,
+    authenticated: body.authenticated === true,
+    model: typeof body.model === "string" && body.model.trim() ? body.model.trim() : null,
+    workspaceCount:
+      typeof body.workspaceCount === "number" && Number.isFinite(body.workspaceCount)
+        ? Math.max(0, Math.trunc(body.workspaceCount))
+        : 0,
+    hasDefaultWorkspace: body.hasDefaultWorkspace === true,
+  };
+}
+
 export async function startCodexRun(
   input: CodexRunnerStartRequest,
 ): Promise<CodexRunnerStartResponse> {
