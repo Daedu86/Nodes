@@ -4,6 +4,28 @@ import type { SessionDocument } from "@/lib/session-documents";
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
+export const PROJECT_MAP_FILENAME = "map.md";
+
+export const createDefaultProjectMap = (title: string | null = null) => {
+  const projectTitle = title?.trim() || "Untitled Project";
+  return [
+    `# ${projectTitle} — Project Map`,
+    "",
+    "> Base document: this map is the canonical index of the project.",
+    "",
+    "## Project rule",
+    "",
+    "- Every project has exactly one base map.",
+    "- Each map node is a thinking/workload unit and may contain multiple sessions or runs.",
+    "- Node outputs can feed downstream nodes in the project map.",
+    "- Sessions are execution history; the map is the project structure and index.",
+    "",
+    "## Nodes",
+    "",
+    "Add and connect project nodes here as the work evolves.",
+  ].join("\n");
+};
+
 export const PROJECT_COLLABORATOR_ROLES = ["editor", "viewer"] as const;
 export const PROJECT_ACCESS_ROLES = ["owner", ...PROJECT_COLLABORATOR_ROLES] as const;
 export const PROJECT_MEMBER_STATUSES = ["pending", "accepted"] as const;
@@ -95,6 +117,12 @@ export const normalizeProjectDocument = (value: unknown): ProjectDocument | null
     })
     : [];
 
+  const title =
+    typeof value.title === "string" && value.title.trim().length > 0
+      ? value.title.trim()
+      : null;
+  const storedMap = typeof value.globalContext === "string" ? value.globalContext.trim() : "";
+
   return {
     accessRole:
       typeof value.accessRole === "string" && PROJECT_ACCESS_ROLES.includes(value.accessRole as ProjectAccessRole)
@@ -112,16 +140,13 @@ export const normalizeProjectDocument = (value: unknown): ProjectDocument | null
       typeof value.createdAt === "string" && value.createdAt.length > 0
         ? value.createdAt
         : new Date().toISOString(),
-    globalContext: typeof value.globalContext === "string" ? value.globalContext : "",
+    globalContext: storedMap || createDefaultProjectMap(title),
     id,
     memoryIds,
     members,
     sessionCount: sessionIds.length,
     sessionIds,
-    title:
-      typeof value.title === "string" && value.title.trim().length > 0
-        ? value.title.trim()
-        : null,
+    title,
     updatedAt:
       typeof value.updatedAt === "string" && value.updatedAt.length > 0
         ? value.updatedAt
