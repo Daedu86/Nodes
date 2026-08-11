@@ -4,6 +4,8 @@ The Codex Runner is the local execution bridge between Nodes AI Canvas and `code
 
 It intentionally runs outside the Next.js/Vercel process because Codex needs a long-lived process with access to a workspace, shell, files, Git, and the user's Codex authentication state.
 
+By default, Canvas Codex runs select **GPT-5.6 Luna** as the model while retaining the Codex execution harness for shell, filesystem, tools, approvals, and agent lifecycle. Override `CODEX_RUNNER_MODEL` only when a project explicitly requires a different model.
+
 ## Architecture
 
 ```text
@@ -14,6 +16,7 @@ Nodes Canvas (browser)
   -> services/codex-runner/server.mjs
   -> codex app-server --listen stdio://
   -> Codex harness
+       -> model: gpt-5.6-luna (default)
 ```
 
 ## Prerequisites
@@ -39,6 +42,7 @@ Configure the Nodes app with matching values:
 ```bash
 CODEX_RUNNER_URL=http://127.0.0.1:8787
 CODEX_RUNNER_TOKEN=replace-with-a-long-random-secret
+CODEX_RUNNER_MODEL=gpt-5.6-luna
 ```
 
 For a remote Nodes deployment, keep the runner on a private network or authenticated tunnel and point `CODEX_RUNNER_URL` at that private endpoint. The runner is not intended to run as a normal Vercel Function.
@@ -69,6 +73,8 @@ Check the runner at:
 ```text
 http://127.0.0.1:8787/healthz
 ```
+
+The health and readiness responses include the selected model so a caller can verify that Luna is active before starting work.
 
 Remove autostart with:
 
@@ -102,6 +108,7 @@ When a child run is started manually with `parentRunId`, it inherits the parent'
 - `CODEX_RUNNER_PORT`: bind port, default `8787`.
 - `CODEX_RUNNER_TOKEN`: shared bearer secret expected from Nodes.
 - `CODEX_BIN`: Codex executable, default `codex`.
+- `CODEX_RUNNER_MODEL`: model passed to Codex `thread/start`; defaults to `gpt-5.6-luna`.
 - `CODEX_DEFAULT_CWD`: one default runner-owned workspace.
 - `CODEX_WORKSPACES_JSON`: optional JSON map from workspace ids to absolute runner-owned paths.
 - `CODEX_RUNNER_AUTO_APPROVE=1`: automatically accepts Codex command/file approval requests. Disabled by default.
@@ -110,9 +117,9 @@ When a child run is started manually with `parentRunId`, it inherits the parent'
 
 ## Health checks
 
-`GET /healthz` is an unauthenticated liveness probe and does not expose credentials.
+`GET /healthz` is an unauthenticated liveness probe and does not expose credentials. It reports the configured model along with runner status.
 
-`GET /readyz` requires the runner token when configured. It starts `codex app-server` if needed and calls `account/read`, which verifies that the local Codex runtime is responsive and has account state available.
+`GET /readyz` requires the runner token when configured. It starts `codex app-server` if needed, calls `account/read` to verify that the local Codex runtime is responsive and has account state available, and reports the configured model.
 
 ## Security
 
