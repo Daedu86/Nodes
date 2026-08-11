@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { useCodexAgentRuns } from "@/components/assistant-ui/thread-graph-flow/use-codex-agent-runs";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Sheet,
   SheetContent,
@@ -55,7 +54,6 @@ type RunnerStatus = {
 type ManagedAgentData = {
   kind?: string;
   title?: string;
-  agentRunId?: string | null;
   agentStatus?: string;
   agentPrompt?: string;
   agentOutput?: string;
@@ -70,7 +68,6 @@ type ManagedAgentData = {
 
 type PendingLaunch = {
   existingIds: Set<string>;
-  label: string;
   prompt: string;
   stage: "await-node" | "await-prompt";
   localId?: string;
@@ -100,7 +97,6 @@ export function ProjectExecutionRunnerPanel({
   const [status, setStatus] = React.useState<RunnerStatus | null>(null);
   const [checking, setChecking] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
-  const [workspaceId, setWorkspaceId] = React.useState("");
   const [pendingLaunch, setPendingLaunch] = React.useState<PendingLaunch | null>(null);
   const [managedLocalId, setManagedLocalId] = React.useState<string | null>(null);
 
@@ -147,6 +143,7 @@ export function ProjectExecutionRunnerPanel({
 
   React.useEffect(() => {
     if (!pendingLaunch) return;
+
     if (pendingLaunch.stage === "await-node") {
       const created = agentRunNodes.find((node) => !pendingLaunch.existingIds.has(node.id));
       if (!created) return;
@@ -155,9 +152,7 @@ export function ProjectExecutionRunnerPanel({
       data.onAgentRoleChange?.("coder");
       setManagedLocalId(created.id);
       setPendingLaunch((current) =>
-        current
-          ? { ...current, localId: created.id, stage: "await-prompt" }
-          : null,
+        current ? { ...current, localId: created.id, stage: "await-prompt" } : null,
       );
       return;
     }
@@ -169,28 +164,10 @@ export function ProjectExecutionRunnerPanel({
     if (!node || !data || data.agentPrompt !== pendingLaunch.prompt) return;
     data.onAgentStart?.();
     setPendingLaunch(null);
-    setMessage("Managed Codex run started. Output, approvals, cancellation, and reconnect state are attached to this session.");
+    setMessage(
+      "Managed Codex run started. Output, approvals, cancellation, and reconnect state are attached to this session.",
+    );
   }, [agentRunNodes, pendingLaunch]);
-
-  React.useEffect(() => {
-    try {
-      setWorkspaceId(window.localStorage.getItem(`nodes:runner-workspace:${project.id}`) ?? "");
-    } catch {
-      setWorkspaceId("");
-    }
-  }, [project.id]);
-
-  React.useEffect(() => {
-    try {
-      if (workspaceId) {
-        window.localStorage.setItem(`nodes:runner-workspace:${project.id}`, workspaceId);
-      } else {
-        window.localStorage.removeItem(`nodes:runner-workspace:${project.id}`);
-      }
-    } catch {
-      // Local storage is a convenience only; runner configuration remains authoritative.
-    }
-  }, [project.id, workspaceId]);
 
   const refreshStatus = React.useCallback(async () => {
     setChecking(true);
@@ -218,12 +195,9 @@ export function ProjectExecutionRunnerPanel({
     return () => window.clearInterval(timer);
   }, [open, refreshStatus]);
 
-  const workspaceReady = Boolean(
-    status && (status.hasDefaultWorkspace || status.workspaceCount > 0),
-  );
-  const needsExplicitWorkspace = Boolean(
-    status && !status.hasDefaultWorkspace && status.workspaceCount > 0,
-  );
+  // The existing managed Codex flow passes project.id as workspaceId. For project-scoped
+  // execution we therefore require an explicit runner allowlist mapping for this project.
+  const workspaceReady = Boolean(status && status.workspaceCount > 0);
   const canRun = Boolean(
     project.accessRole === "owner" &&
       status?.reachable &&
@@ -231,20 +205,30 @@ export function ProjectExecutionRunnerPanel({
       status.authenticated &&
       workspaceReady &&
       selectedNode &&
-      selectedSessionId &&
-      (!needsExplicitWorkspace || workspaceId.trim()),
+      selectedSessionId,
   );
+
+  const effectiveNextStep = React.useMemo<RunnerNextStep | null>(() => {
+    if (!status) return null;
+    if (status.reachable && status.authenticated && status.workspaceCount === 0) {
+      return {
+        code: "configure_workspace",
+        title: "Map this project to a runner workspace",
+        detail: `Add this project id to CODEX_WORKSPACES_JSON on the runner: ${project.id}`,
+      };
+    }
+    return status.nextStep;
+  }, [project.id, status]);
 
   const runSelectedWorkload = React.useCallback(() => {
     if (!selectedNode || !selectedSessionId || !canRun || runBusy) return;
     setMessage(null);
     const prompt = [
-      "Execute this Nodes project workload in the configured workspace.",
+      "Execute this Nodes project workload in the configured project workspace.",
       `Project: ${project.title ?? project.id}`,
       `Workload: ${selectedNode.title}`,
       selectedNode.description ? `Objective: ${selectedNode.description}` : "",
       upstreamSummary ? `Selected upstream outputs:\n${upstreamSummary}` : "",
-      workspaceId.trim() ? `Requested runner workspace id: ${workspaceId.trim()}` : "",
       "Use the repository/workspace as the source of truth. Preserve useful outputs as files/artifacts and report what was executed, verified, and what remains blocked. Do not expose local credentials or authentication files.",
     ]
       .filter(Boolean)
@@ -252,7 +236,6 @@ export function ProjectExecutionRunnerPanel({
 
     setPendingLaunch({
       existingIds: new Set(agentRunNodes.map((node) => node.id)),
-      label: selectedNode.title,
       prompt,
       stage: "await-node",
     });
@@ -267,7 +250,6 @@ export function ProjectExecutionRunnerPanel({
     selectedNode,
     selectedSessionId,
     upstreamSummary,
-    workspaceId,
   ]);
 
   const copyCommand = React.useCallback(async (command: string) => {
@@ -321,27 +303,27 @@ export function ProjectExecutionRunnerPanel({
             <div className="mt-3 flex flex-wrap gap-2">
               {statusPill(Boolean(status?.reachable), "Runner online", "Runner offline")}
               {statusPill(Boolean(status?.authenticated), "Codex authenticated", "Authentication required")}
-              {statusPill(workspaceReady, "Workspace configured", "Workspace required")}
+              {statusPill(workspaceReady, "Project workspace mapped", "Project workspace required")}
             </div>
 
             <div className="mt-3 rounded-xl border border-border/60 bg-background p-3">
               <div className="flex items-start gap-2">
-                {status?.nextStep.code === "ready" ? (
+                {effectiveNextStep?.code === "ready" ? (
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
                 ) : (
                   <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                 )}
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">
-                    {status?.nextStep.title ?? (checking ? "Checking runner…" : "Check runner status")}
+                    {effectiveNextStep?.title ?? (checking ? "Checking runner…" : "Check runner status")}
                   </p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    {status?.nextStep.detail ?? "Nodes will tell you exactly what must be done before this workload can run."}
+                    {effectiveNextStep?.detail ?? "Nodes will tell you exactly what must be done before this workload can run."}
                   </p>
-                  {status?.nextStep.command ? (
+                  {effectiveNextStep?.command ? (
                     <div className="mt-2 flex items-center gap-2 rounded-lg border border-border/60 bg-muted/30 px-2 py-2">
-                      <code className="min-w-0 flex-1 truncate text-xs">{status.nextStep.command}</code>
-                      <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void copyCommand(status.nextStep.command!)} aria-label="Copy authentication command">
+                      <code className="min-w-0 flex-1 truncate text-xs">{effectiveNextStep.command}</code>
+                      <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void copyCommand(effectiveNextStep.command!)} aria-label="Copy authentication command">
                         <Clipboard className="h-3.5 w-3.5" />
                       </Button>
                     </div>
@@ -372,16 +354,10 @@ export function ProjectExecutionRunnerPanel({
           </section>
 
           <section className="rounded-2xl border border-border/60 bg-background p-3">
-            <label htmlFor="project-runner-workspace" className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Runner workspace</label>
-            <Input
-              id="project-runner-workspace"
-              className="mt-2"
-              value={workspaceId}
-              onChange={(event) => setWorkspaceId(event.currentTarget.value)}
-              placeholder={status?.hasDefaultWorkspace ? "Default workspace (leave blank)" : "Configured workspace id, e.g. tycho"}
-            />
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Runner workspace key</p>
+            <code className="mt-2 block overflow-x-auto rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-xs">{project.id}</code>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              This is a project-local binding stored in this browser, not a credential. The runner resolves the ID through its server-side CODEX_WORKSPACES_JSON allowlist.
+              Managed project runs use the project id as the workspace key. Configure this key in the runner-owned CODEX_WORKSPACES_JSON allowlist; no filesystem path is accepted from the browser.
             </p>
           </section>
 
@@ -440,7 +416,7 @@ export function ProjectExecutionRunnerPanel({
           </Button>
           {!canRun ? (
             <p className="text-center text-[11px] leading-4 text-muted-foreground">
-              Run unlocks after runner + authentication + workspace + selected session are ready.
+              Run unlocks after runner + authentication + project workspace mapping + selected session are ready.
             </p>
           ) : null}
         </SheetFooter>
