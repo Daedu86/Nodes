@@ -34,6 +34,8 @@ type UseCanvasViewportControllerOptions = {
   visibleNodeCount: number;
 };
 
+const MIN_AUTOFIT_ZOOM = 0.52;
+
 export const shouldRefitCanvasTree = (
   previousSignature: string | null,
   nextSignature: string,
@@ -64,6 +66,7 @@ export function useCanvasViewportController({
         .fitView({
           duration: 420,
           padding: 0.22,
+          minZoom: MIN_AUTOFIT_ZOOM,
         })
         .then(() => {
           setStoredViewport(reactFlowInstance.getViewport());
@@ -110,7 +113,11 @@ export function useCanvasViewportController({
 
   const handleResetView = React.useCallback(async () => {
     if (!reactFlowInstance) return;
-    await reactFlowInstance.fitView({ duration: 450, padding: 0.18 });
+    await reactFlowInstance.fitView({
+      duration: 450,
+      padding: 0.18,
+      minZoom: MIN_AUTOFIT_ZOOM,
+    });
     setStoredViewport(reactFlowInstance.getViewport());
   }, [reactFlowInstance, setStoredViewport]);
 

@@ -14,6 +14,8 @@ const ARTIFACT_NODE_SIZE = { width: 320, height: 228 };
 const ARTIFACT_LANE_X = -420;
 const ARTIFACT_START_Y = 60;
 const ARTIFACT_GAP_Y = 272;
+const TREE_RANK_SEPARATION = 220;
+const TREE_NODE_SEPARATION = 168;
 
 type SizedFlowNode = {
   node: ThreadGraphFlowNode;
@@ -52,10 +54,10 @@ export const layoutThreadGraphFlow = (
   const graph = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
   graph.setGraph({
     rankdir: "LR",
-    ranksep: 150,
-    nodesep: 104,
-    marginx: 48,
-    marginy: 48,
+    ranksep: TREE_RANK_SEPARATION,
+    nodesep: TREE_NODE_SEPARATION,
+    marginx: 64,
+    marginy: 64,
   });
 
   for (const { node, size } of conversationNodes) {
