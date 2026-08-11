@@ -59,6 +59,7 @@ const readRunnerError = async (response: Response) => {
 };
 
 export type CodexRunnerReadiness = {
+  reachable: boolean;
   ok: boolean;
   codexRunning: boolean;
   authenticated: boolean;
@@ -67,29 +68,41 @@ export type CodexRunnerReadiness = {
   hasDefaultWorkspace: boolean;
 };
 
+const asRunnerBody = async (response: Response) =>
+  ((await response.json().catch(() => null)) as Record<string, unknown> | null) ?? {};
+
 export async function getCodexRunnerReadiness(
   ownerId: string,
 ): Promise<CodexRunnerReadiness> {
-  const response = await runnerFetch(ownerId, "/readyz", {
+  const healthResponse = await runnerFetch(ownerId, "/healthz", {
+    method: "GET",
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!healthResponse.ok) {
+    throw new Error(await readRunnerError(healthResponse));
+  }
+  const health = await asRunnerBody(healthResponse);
+
+  const readyResponse = await runnerFetch(ownerId, "/readyz", {
     method: "GET",
     signal: AbortSignal.timeout(8_000),
-  });
+  }).catch(() => null);
+  const ready = readyResponse ? await asRunnerBody(readyResponse) : {};
 
-  if (!response.ok) {
-    throw new Error(await readRunnerError(response));
-  }
+  const numberField = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+  const stringField = (value: unknown) =>
+    typeof value === "string" && value.trim() ? value.trim() : null;
 
-  const body = (await response.json()) as Record<string, unknown>;
   return {
-    ok: body.ok === true,
-    codexRunning: body.codexRunning === true,
-    authenticated: body.authenticated === true,
-    model: typeof body.model === "string" && body.model.trim() ? body.model.trim() : null,
-    workspaceCount:
-      typeof body.workspaceCount === "number" && Number.isFinite(body.workspaceCount)
-        ? Math.max(0, Math.trunc(body.workspaceCount))
-        : 0,
-    hasDefaultWorkspace: body.hasDefaultWorkspace === true,
+    reachable: true,
+    ok: readyResponse?.ok === true && ready.ok === true,
+    codexRunning: ready.codexRunning === true || health.codexRunning === true,
+    authenticated: ready.authenticated === true,
+    model: stringField(ready.model) ?? stringField(health.model),
+    workspaceCount: numberField(ready.workspaceCount ?? health.workspaceCount),
+    hasDefaultWorkspace:
+      ready.hasDefaultWorkspace === true || health.hasDefaultWorkspace === true,
   };
 }
 
