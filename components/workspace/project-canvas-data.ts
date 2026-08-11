@@ -30,6 +30,19 @@ const STATUS_ACCENTS: Record<string, string> = {
   ready: "#7c3aed",
 };
 
+const NODE_TYPE_ACCENTS: Record<string, string> = {
+  iteration: "#4f46e5",
+  iteration_result: "#d97706",
+  final_submission: "#0891b2",
+};
+
+const NODE_TYPE_ROLES: Record<string, string> = {
+  iteration: "Iteration",
+  iteration_result: "Iteration result",
+  final_submission: "Final submission",
+  workload: "workload",
+};
+
 const formatSessionTitle = (title: string | null) => title?.trim() || "Untitled Session";
 
 const makeWorkloadNodeId = (projectId: string, mapNodeId: string) =>
@@ -52,8 +65,9 @@ const summarizeNodeSessions = (sessions: SessionDocument[]) => {
 export function buildProjectCanvasFlow(
   project: ProjectDocument,
   sessions: SessionDocument[],
-  _memoryItems: ProjectMemoryItem[] = [],
+  memoryItems: ProjectMemoryItem[] = [],
 ) {
+  void memoryItems;
   const nodes: ThreadGraphFlowNode[] = [];
   const edges: ThreadGraphFlowEdge[] = [];
   const sessionById = new Map(sessions.map((session) => [session.id, session] as const));
@@ -73,7 +87,9 @@ export function buildProjectCanvasFlow(
       ? sessionById.get(mapNode.primarySessionId) ?? null
       : nodeSessions[0] ?? null;
     const output = mapNode.selectedOutput;
-    const accent = STATUS_ACCENTS[mapNode.status]
+    const nodeType = mapNode.nodeType ?? "workload";
+    const accent = NODE_TYPE_ACCENTS[nodeType]
+      ?? STATUS_ACCENTS[mapNode.status]
       ?? WORKLOAD_SWATCHES[index % WORKLOAD_SWATCHES.length]
       ?? "#2563eb";
     const description = mapNode.description.trim();
@@ -82,6 +98,11 @@ export function buildProjectCanvasFlow(
       : output
         ? `Output selected from ${formatSessionTitle(sessionById.get(output.sessionId)?.title ?? null)}`
         : "No output selected yet";
+    const hierarchyPreview = mapNode.childProjectId
+      ? `Child canvas: ${mapNode.childProjectId}`
+      : mapNode.terminalResult
+        ? "Terminal external evaluation for this iteration"
+        : null;
 
     nodes.push({
       id: makeWorkloadNodeId(project.id, mapNode.id),
@@ -94,11 +115,14 @@ export function buildProjectCanvasFlow(
         mapNodeId: mapNode.id,
         messageId: output?.messageId ?? null,
         preview: [
+          nodeType === "iteration_result" ? "ITERATION RESULT" : null,
+          nodeType === "final_submission" ? "PROJECT FINAL SUBMISSION" : null,
           description || "Workload / thinking node",
+          hierarchyPreview,
           summarizeNodeSessions(nodeSessions),
           outputPreview,
-        ].join("\n\n"),
-        role: "workload",
+        ].filter(Boolean).join("\n\n"),
+        role: NODE_TYPE_ROLES[nodeType] ?? "workload",
         sessionId: primarySession?.id ?? null,
         sessionIds: mapNode.sessionIds,
         sessionTitle:
@@ -116,13 +140,15 @@ export function buildProjectCanvasFlow(
   map.edges.forEach((mapEdge) => {
     const sourceNode = map.nodes.find((node) => node.id === mapEdge.sourceNodeId);
     if (!sourceNode) return;
+    const sourceType = sourceNode.nodeType ?? "workload";
     edges.push({
       id: `project:${project.id}:edge:${mapEdge.id}`,
       source: makeWorkloadNodeId(project.id, mapEdge.sourceNodeId),
       target: makeWorkloadNodeId(project.id, mapEdge.targetNodeId),
       type: "threadEdge",
       data: {
-        accent: sourceNode.selectedOutput ? "#16a34a" : "#64748b",
+        accent: NODE_TYPE_ACCENTS[sourceType]
+          ?? (sourceNode.selectedOutput ? "#16a34a" : "#64748b"),
         label: mapEdge.label ?? (sourceNode.selectedOutput ? "output" : "depends on"),
         tone: "default",
       },

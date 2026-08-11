@@ -8,7 +8,15 @@ export const PROJECT_MAP_NODE_STATUSES = [
   "blocked",
 ] as const;
 
+export const PROJECT_MAP_NODE_TYPES = [
+  "workload",
+  "iteration",
+  "iteration_result",
+  "final_submission",
+] as const;
+
 export type ProjectMapNodeStatus = (typeof PROJECT_MAP_NODE_STATUSES)[number];
+export type ProjectMapNodeType = (typeof PROJECT_MAP_NODE_TYPES)[number];
 
 export type ProjectMapNodeOutput = {
   artifactIds: string[];
@@ -19,12 +27,15 @@ export type ProjectMapNodeOutput = {
 };
 
 export type ProjectMapNode = {
+  childProjectId?: string | null;
   description: string;
   id: string;
+  nodeType?: ProjectMapNodeType;
   primarySessionId: string | null;
   selectedOutput: ProjectMapNodeOutput | null;
   sessionIds: string[];
   status: ProjectMapNodeStatus;
+  terminalResult?: boolean;
   title: string;
 };
 
@@ -56,6 +67,11 @@ const normalizeNodeStatus = (value: unknown): ProjectMapNodeStatus =>
   typeof value === "string" && PROJECT_MAP_NODE_STATUSES.includes(value as ProjectMapNodeStatus)
     ? (value as ProjectMapNodeStatus)
     : "planned";
+
+const normalizeNodeType = (value: unknown): ProjectMapNodeType =>
+  typeof value === "string" && PROJECT_MAP_NODE_TYPES.includes(value as ProjectMapNodeType)
+    ? (value as ProjectMapNodeType)
+    : "workload";
 
 const normalizeOutput = (
   value: unknown,
@@ -136,12 +152,15 @@ export const normalizeProjectMap = (value: unknown): ProjectMap => {
         : sessionIds[0] ?? null;
 
     nodes.push({
+      childProjectId: normalizeString(rawNode.childProjectId),
       description: typeof rawNode.description === "string" ? rawNode.description.trim() : "",
       id,
+      nodeType: normalizeNodeType(rawNode.nodeType),
       primarySessionId,
       selectedOutput: normalizeOutput(rawNode.selectedOutput, allowedSessionIds),
       sessionIds,
       status: normalizeNodeStatus(rawNode.status),
+      terminalResult: rawNode.terminalResult === true,
       title,
     });
     seenNodeIds.add(id);
@@ -234,12 +253,15 @@ export const buildLegacyProjectMap = (
 ): ProjectMap => {
   const normalizedSessionIds = [...new Set(sessionIds.filter((entry) => entry.length > 0))];
   const nodes = normalizedSessionIds.map<ProjectMapNode>((sessionId, index) => ({
+    childProjectId: null,
     description: "Legacy project session. Assign this session to a workload node to refine the project map.",
     id: `session-${sessionId}`,
+    nodeType: "workload",
     primarySessionId: sessionId,
     selectedOutput: null,
     sessionIds: [sessionId],
     status: "ready",
+    terminalResult: false,
     title: sessionTitles.get(sessionId)?.trim() || `Workload ${index + 1}`,
   }));
 
