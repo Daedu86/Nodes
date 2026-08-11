@@ -55,7 +55,6 @@ export async function GET(req: Request) {
     const readiness = await getCodexRunnerReadiness(guarded.user.id);
     return NextResponse.json({
       configured: true,
-      reachable: true,
       ...readiness,
       nextStep: nextStepFor(readiness),
     });
