@@ -13,6 +13,7 @@ import type {
   ProjectMember,
   ProjectSummary,
 } from "@/lib/project-documents";
+import { normalizeProjectMap } from "@/lib/project-map";
 import { type ProjectMemoryItem, normalizeProjectMemoryItem } from "@/lib/memory-documents";
 import type {
   SessionBlobCleanupResult,
@@ -136,6 +137,7 @@ type ProjectRow = {
   created_at: string;
   global_context: string;
   id: string;
+  map_json?: unknown;
   owner_id?: string | null;
   project_members?: ProjectMemberRow[] | null;
   project_memory_links?: ProjectRelationRow[] | null;
@@ -191,6 +193,7 @@ export const toProjectDocumentFromRow = (
   accessRole: ProjectAccessRole = "owner",
 ): ProjectDocument => {
   const sessionIds = (row.project_sessions ?? [])
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
     .map((entry) => entry.session_id)
     .filter((value): value is string => typeof value === "string" && value.length > 0);
   const memoryIds = (row.project_memory_links ?? [])
@@ -204,6 +207,7 @@ export const toProjectDocumentFromRow = (
     createdAt: row.created_at,
     globalContext: row.global_context,
     id: row.id,
+    map: normalizeProjectMap(row.map_json),
     memoryIds,
     members: toProjectMembersFromRow(row),
     sessionCount: sessionIds.length,
