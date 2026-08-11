@@ -7,6 +7,7 @@ import {
   PROJECT_MEMORY_TYPE_ORDER,
 } from "@/lib/project-memory-meta";
 import { PROJECT_MAP_FILENAME, type ProjectDocument } from "@/lib/project-documents";
+import { parseProjectMapNodes } from "@/lib/project-map";
 import type { SessionDocument } from "@/lib/session-documents";
 import { getSessionTreeStats } from "@/lib/session-context";
 import {
@@ -28,8 +29,12 @@ const SESSION_SWATCHES = [
   "#0891b2",
 ];
 const PROJECT_MAP_ACCENT = "#d97706";
+const PROJECT_MAP_NODE_ACCENT = "#f59e0b";
 
 const formatSessionTitle = (title: string | null) => title?.trim() || "Untitled Session";
+
+const normalizeMatchText = (value: string) =>
+  value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 const getMessageId = (value: unknown, fallback: string) =>
   typeof value === "string" && value.length > 0 ? value : fallback;
@@ -50,6 +55,8 @@ const makeMessageNodeId = (projectId: string, sessionId: string, messageId: stri
   `project:${projectId}:session:${sessionId}:message:${messageId}`;
 
 const makeContextNodeId = (projectId: string) => `project:${projectId}:context`;
+const makeMapNodeId = (projectId: string, mapNodeId: string) =>
+  `project:${projectId}:map-node:${mapNodeId}`;
 const makeMemoryNodeId = (projectId: string, memoryId: string) => `project:${projectId}:memory:${memoryId}`;
 
 const resolveMemorySourceNodeIds = (
@@ -81,6 +88,7 @@ export function buildProjectCanvasFlow(
   const orderedSessions = project.sessionIds
     .map((sessionId) => sessions.find((session) => session.id === sessionId))
     .filter((session): session is SessionDocument => Boolean(session));
+  const projectMapNodes = parseProjectMapNodes(project.globalContext);
 
   const globalContextNodeId = makeContextNodeId(project.id);
   const memoryLaneCounts = new Map<string, number>();
@@ -88,17 +96,55 @@ export function buildProjectCanvasFlow(
   nodes.push({
     id: globalContextNodeId,
     type: "artifactNode",
-    position: { x: -420, y: 48 },
+    position: { x: 64, y: 64 },
     data: {
       accent: PROJECT_MAP_ACCENT,
       artifactType: "text",
-      kind: "artifact",
-      linkedArtifactCount: orderedSessions.length,
-      preview: project.globalContext,
-      role: "global-context",
+      kind: "root",
+      linkedArtifactCount: projectMapNodes.length,
+      preview:
+        projectMapNodes.length > 0
+          ? `${PROJECT_MAP_FILENAME} is the canonical project index. It currently defines ${projectMapNodes.length} workload nodes.`
+          : project.globalContext,
+      role: "project map",
       statusLabel: `${PROJECT_MAP_FILENAME} · base of project`,
       title: project.title?.trim() ? `${project.title} Map` : "Project Map",
     },
+  });
+
+  projectMapNodes.forEach((mapNode, mapNodeIndex) => {
+    const mapNodeId = makeMapNodeId(project.id, mapNode.id);
+    nodes.push({
+      id: mapNodeId,
+      type: "threadNode",
+      position: { x: 0, y: 0 },
+      data: {
+        accent: PROJECT_MAP_NODE_ACCENT,
+        depth: mapNodeIndex + 1,
+        idx: mapNodeIndex,
+        kind: "message",
+        preview: `Workload/thinking unit ${mapNodeIndex + 1} of ${projectMapNodes.length}. Sessions and runs execute work underneath this project-map node; their outputs can feed downstream map nodes.`,
+        role: "map node",
+        statusLabel: "project workload node",
+        title: `${String(mapNodeIndex + 1).padStart(2, "0")}. ${mapNode.title}`,
+      },
+    });
+
+    const previousNodeId =
+      mapNodeIndex === 0
+        ? globalContextNodeId
+        : makeMapNodeId(project.id, projectMapNodes[mapNodeIndex - 1].id);
+    edges.push({
+      id: `${previousNodeId}=>${mapNodeId}`,
+      source: previousNodeId,
+      target: mapNodeId,
+      type: "threadEdge",
+      data: {
+        accent: PROJECT_MAP_NODE_ACCENT,
+        label: mapNodeIndex === 0 ? "map start" : "next workload",
+        tone: "default",
+      },
+    });
   });
 
   memoryItems.forEach((memoryItem) => {
@@ -184,6 +230,15 @@ export function buildProjectCanvasFlow(
     const sessionNodeId = makeSessionNodeId(project.id, session.id);
     const sessionStats = getSessionTreeStats(session.snapshot);
     const sessionTitle = formatSessionTitle(session.title);
+    const normalizedSessionTitle = normalizeMatchText(sessionTitle);
+    const matchedMapNode = projectMapNodes.find((mapNode) => {
+      const normalizedMapTitle = normalizeMatchText(mapNode.title);
+      return normalizedSessionTitle.length >= 4 &&
+        (normalizedMapTitle.includes(normalizedSessionTitle) || normalizedSessionTitle.includes(normalizedMapTitle));
+    });
+    const workloadParentId = matchedMapNode
+      ? makeMapNodeId(project.id, matchedMapNode.id)
+      : globalContextNodeId;
 
     nodes.push({
       id: sessionNodeId,
@@ -195,27 +250,28 @@ export function buildProjectCanvasFlow(
         kind: "message",
         preview: [
           isArenaWinner ? "Arena winner" : null,
+          matchedMapNode ? `Workload: ${matchedMapNode.title}` : "Project-level workload history",
           `${sessionStats.messageCount} messages`,
           `${sessionStats.rootCount} root branches`,
           `${sessionStats.siblingGroups} branching points`,
           `${session.artifacts.filter((artifact) => artifact.artifactType !== "prompt").length} artifacts`,
         ].filter(Boolean).join(" · "),
-        role: "session",
+        role: "workload session",
         sessionId: session.id,
         sessionTitle,
-        statusLabel: isArenaWinner ? "Arena winner" : null,
+        statusLabel: isArenaWinner ? "Arena winner" : "execution history",
         title: sessionTitle,
       },
     });
 
     edges.push({
-      id: `${globalContextNodeId}=>${sessionNodeId}`,
-      source: globalContextNodeId,
+      id: `${workloadParentId}=>${sessionNodeId}`,
+      source: workloadParentId,
       target: sessionNodeId,
       type: "threadEdge",
       data: {
         accent: sessionColor,
-        label: "map",
+        label: matchedMapNode ? "session / run" : "project session",
         tone: "context",
       },
     });
