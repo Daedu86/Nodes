@@ -58,6 +58,57 @@ const readRunnerError = async (response: Response) => {
   return fallback;
 };
 
+export type CodexRunnerReadiness = {
+  reachable: boolean;
+  ok: boolean;
+  codexRunning: boolean;
+  authenticated: boolean;
+  model: string | null;
+  workspaceCount: number;
+  hasDefaultWorkspace: boolean;
+};
+
+const asRunnerBody = async (response: Response) =>
+  ((await response.json().catch(() => null)) as Record<string, unknown> | null) ?? {};
+
+export async function getCodexRunnerReadiness(
+  ownerId: string,
+): Promise<CodexRunnerReadiness> {
+  const healthResponse = await runnerFetch(ownerId, "/healthz", {
+    method: "GET",
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!healthResponse.ok) {
+    throw new Error(await readRunnerError(healthResponse));
+  }
+  const health = await asRunnerBody(healthResponse);
+
+  const readyResponse = await runnerFetch(ownerId, "/readyz", {
+    method: "GET",
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!readyResponse.ok) {
+    throw new Error(await readRunnerError(readyResponse));
+  }
+  const ready = await asRunnerBody(readyResponse);
+
+  const numberField = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+  const stringField = (value: unknown) =>
+    typeof value === "string" && value.trim() ? value.trim() : null;
+
+  return {
+    reachable: true,
+    ok: ready.ok === true,
+    codexRunning: ready.codexRunning === true || health.codexRunning === true,
+    authenticated: ready.authenticated === true,
+    model: stringField(ready.model) ?? stringField(health.model),
+    workspaceCount: numberField(ready.workspaceCount ?? health.workspaceCount),
+    hasDefaultWorkspace:
+      ready.hasDefaultWorkspace === true || health.hasDefaultWorkspace === true,
+  };
+}
+
 export async function startCodexRun(
   input: CodexRunnerStartRequest,
 ): Promise<CodexRunnerStartResponse> {
