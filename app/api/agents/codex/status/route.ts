@@ -12,12 +12,16 @@ type NextStep = {
   command?: string;
 };
 
-const nextStepFor = (status: {
-  codexRunning: boolean;
-  authenticated: boolean;
-  workspaceCount: number;
-  hasDefaultWorkspace: boolean;
-}): NextStep => {
+const nextStepFor = (
+  status: {
+    codexRunning: boolean;
+    authenticated: boolean;
+    workspaceCount: number;
+    hasDefaultWorkspace: boolean;
+  },
+  workspaceId: string | null,
+  workspaceConfigured: boolean,
+): NextStep => {
   if (!status.codexRunning) {
     return {
       code: "start_runner",
@@ -33,7 +37,14 @@ const nextStepFor = (status: {
       command: "codex login",
     };
   }
-  if (!status.hasDefaultWorkspace && status.workspaceCount === 0) {
+  if (workspaceId && !workspaceConfigured) {
+    return {
+      code: "configure_workspace",
+      title: "Map this project to a runner workspace",
+      detail: `Add this project id to CODEX_WORKSPACES_JSON on the runner: ${workspaceId}`,
+    };
+  }
+  if (!workspaceId && !status.hasDefaultWorkspace && status.workspaceCount === 0) {
     return {
       code: "configure_workspace",
       title: "Configure an execution workspace",
@@ -51,12 +62,21 @@ export async function GET(req: Request) {
   const guarded = await requireLocalApiUser(req);
   if ("response" in guarded) return guarded.response;
 
+  const url = new URL(req.url);
+  const workspaceId = url.searchParams.get("workspaceId")?.trim() || null;
+
   try {
     const readiness = await getCodexRunnerReadiness(guarded.user.id);
+    const workspaceConfigured = workspaceId
+      ? readiness.workspaceIds.includes(workspaceId)
+      : readiness.hasDefaultWorkspace || readiness.workspaceCount > 0;
+    const { workspaceIds: _workspaceIds, ...safeReadiness } = readiness;
+
     return NextResponse.json({
       configured: true,
-      ...readiness,
-      nextStep: nextStepFor(readiness),
+      ...safeReadiness,
+      workspaceConfigured,
+      nextStep: nextStepFor(readiness, workspaceId, workspaceConfigured),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to reach the Codex runner.";
@@ -70,6 +90,7 @@ export async function GET(req: Request) {
       model: null,
       workspaceCount: 0,
       hasDefaultWorkspace: false,
+      workspaceConfigured: false,
       nextStep: missingConfiguration
         ? {
             code: "configure_runner",
