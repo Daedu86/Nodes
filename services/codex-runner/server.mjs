@@ -398,7 +398,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/readyz" && req.method === "GET") {
       await codex.ensureStarted();
       const account = await codex.request("account/read", {});
-      return json(res, 200, { ok: true, codexRunning: true, model: MODEL, authenticated: Boolean(account), workspaceCount: WORKSPACES.size, hasDefaultWorkspace: Boolean(DEFAULT_CWD) });
+      return json(res, 200, { ok: true, codexRunning: true, model: MODEL, authenticated: Boolean(account), workspaceCount: WORKSPACES.size, workspaceIds: [...WORKSPACES.keys()], hasDefaultWorkspace: Boolean(DEFAULT_CWD) });
     }
 
     if (url.pathname === "/v1/account/usage" && req.method === "GET") {
