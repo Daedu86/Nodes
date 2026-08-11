@@ -15,6 +15,7 @@ import {
   type ProjectMember,
   type ProjectSummary,
 } from "@/lib/project-documents";
+import { normalizeProjectMap } from "@/lib/project-map";
 
 type StoredProject = Omit<ProjectDocument, "accessRole" | "sessionCount"> & {
   ownerId: string | null;
@@ -217,6 +218,7 @@ export const fileProjectRepositoryV2: ProjectRepository = {
       createdAt: now,
       globalContext: typeof input.globalContext === "string" ? input.globalContext : "",
       id: randomUUID(),
+      map: normalizeProjectMap(input.map),
       memoryIds: [...new Set(input.memoryIds ?? [])],
       members: [],
       ownerId: input.ownerId ?? null,
@@ -235,6 +237,7 @@ export const fileProjectRepositoryV2: ProjectRepository = {
       arenaWinnerBranchKey: patch.arenaWinnerBranchKey === undefined ? current.arenaWinnerBranchKey : patch.arenaWinnerBranchKey,
       arenaWinnerSessionId: patch.arenaWinnerSessionId === undefined ? current.arenaWinnerSessionId : patch.arenaWinnerSessionId,
       globalContext: patch.globalContext === undefined ? current.globalContext : patch.globalContext,
+      map: patch.map === undefined ? current.map : normalizeProjectMap(patch.map),
       memoryIds: patch.memoryIds === undefined ? current.memoryIds : [...new Set(patch.memoryIds)],
       sessionIds: patch.sessionIds === undefined ? current.sessionIds : [...new Set(patch.sessionIds)],
       title: patch.title === undefined ? current.title : typeof patch.title === "string" && patch.title.trim() ? patch.title.trim() : null,

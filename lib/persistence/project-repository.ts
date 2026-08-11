@@ -3,6 +3,7 @@ import type {
   ProjectDocument,
   ProjectSummary,
 } from "@/lib/project-documents";
+import type { ProjectMap } from "@/lib/project-map";
 
 export type ProjectActor = {
   userEmail: string | null;
@@ -19,6 +20,7 @@ export type ProjectListOptions = {
 
 export type ProjectCreateInput = {
   globalContext?: string;
+  map?: ProjectMap;
   memoryIds?: string[];
   ownerId?: string;
   sessionIds?: string[];
@@ -29,6 +31,7 @@ export type ProjectPatch = {
   arenaWinnerBranchKey?: string | null;
   arenaWinnerSessionId?: string | null;
   globalContext?: string;
+  map?: ProjectMap;
   memoryIds?: string[];
   sessionIds?: string[];
   title?: string | null;
