@@ -18,18 +18,27 @@ import type {
   ProjectDocument,
   ProjectSummary,
 } from "@/lib/project-documents";
+import type { ProjectMap } from "@/lib/project-map";
 import { hasPostAuthChatHandoff } from "@/lib/client/post-auth-handoff";
+
+type ProjectCreatePatch = {
+  globalContext?: string;
+  map?: ProjectMap;
+  memoryIds?: string[];
+  sessionIds?: string[];
+  title?: string | null;
+};
+
+type ProjectUpdatePatch = ProjectCreatePatch & {
+  arenaWinnerBranchKey?: string | null;
+  arenaWinnerSessionId?: string | null;
+};
 
 type ProjectsContextValue = {
   activeProject: ProjectDocument | null;
   activeProjectId: string | null;
   clearActiveProject: () => void;
-  createProject: (input?: {
-    globalContext?: string;
-    memoryIds?: string[];
-    sessionIds?: string[];
-    title?: string | null;
-  }) => Promise<ProjectDocument>;
+  createProject: (input?: ProjectCreatePatch) => Promise<ProjectDocument>;
   deleteProject: (projectId: string) => Promise<void>;
   deleteProjects: (projectIds: string[]) => Promise<void>;
   isReady: boolean;
@@ -37,14 +46,7 @@ type ProjectsContextValue = {
   refreshProjects: () => Promise<ProjectSummary[]>;
   removeActiveProjectMember: (email: string) => Promise<ProjectDocument | null>;
   renameProject: (projectId: string, title: string | null) => Promise<void>;
-  saveActiveProjectPatch: (patch: {
-    arenaWinnerBranchKey?: string | null;
-    arenaWinnerSessionId?: string | null;
-    globalContext?: string;
-    memoryIds?: string[];
-    sessionIds?: string[];
-    title?: string | null;
-  }) => Promise<ProjectDocument | null>;
+  saveActiveProjectPatch: (patch: ProjectUpdatePatch) => Promise<ProjectDocument | null>;
   saveActiveProjectMember: (input: {
     email: string;
     role: ProjectCollaboratorRole;
@@ -194,12 +196,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [loadProject]);
 
-  const createProject = React.useCallback(async (input?: {
-    globalContext?: string;
-    memoryIds?: string[];
-    sessionIds?: string[];
-    title?: string | null;
-  }) => {
+  const createProject = React.useCallback(async (input?: ProjectCreatePatch) => {
     setIsReady(false);
     try {
       const data = await fetchJson<ProjectResponse>("/api/projects", {
@@ -266,14 +263,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
     updateKnownProject(data.project);
   }, [updateKnownProject]);
 
-  const saveActiveProjectPatch = React.useCallback((patch: {
-    arenaWinnerBranchKey?: string | null;
-    arenaWinnerSessionId?: string | null;
-    globalContext?: string;
-    memoryIds?: string[];
-    sessionIds?: string[];
-    title?: string | null;
-  }) => {
+  const saveActiveProjectPatch = React.useCallback((patch: ProjectUpdatePatch) => {
     const enqueue = async () => {
       const projectId = activeProjectRef.current?.id;
       if (!projectId) return null;
