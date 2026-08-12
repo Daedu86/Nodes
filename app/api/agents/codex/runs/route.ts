@@ -52,15 +52,16 @@ const loadSelectedAncestorArtifacts = async ({
   const artifacts: SessionArtifact[] = [];
 
   for (const ref of refs) {
-    let sourceSession = sessions.get(ref.sessionId);
+    let sourceSession = sessions.get(ref.sessionId) ?? null;
     if (!sourceSession) {
-      sourceSession = await getSession(ref.sessionId, ownerId).catch(() => null);
-      if (!sourceSession) {
+      const loaded = await getSession(ref.sessionId, ownerId).catch(() => null);
+      if (!loaded) {
         throw new Error(
           `Selected upstream session is unavailable for workload execution: ${ref.sessionId}`,
         );
       }
-      sessions.set(ref.sessionId, sourceSession);
+      sourceSession = loaded;
+      sessions.set(ref.sessionId, loaded);
     }
 
     const requestedIds = new Set(ref.artifactIds);
