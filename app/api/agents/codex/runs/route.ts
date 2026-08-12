@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { startCodexRun } from "@/lib/agents/codex/runner-client";
 import type { CodexAgentRole, StartCodexRunInput } from "@/lib/agents/codex/types";
+import {
+  buildSessionWorkspaceFiles,
+  hasTychoProtocolWorkspaceFile,
+} from "@/lib/agents/codex/session-workspace-files";
 import { recordAgentEvent } from "@/lib/server/agent-work";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
 import { getSession } from "@/lib/session-store";
@@ -49,6 +53,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Session not found." }, { status: 404 });
   }
 
+  let workspaceFiles;
+  try {
+    workspaceFiles = buildSessionWorkspaceFiles(session.artifacts);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to prepare primary-session workspace artifacts.",
+      },
+      { status: 400 },
+    );
+  }
+  const approvalMode = hasTychoProtocolWorkspaceFile(workspaceFiles)
+    ? "tycho-isolated" as const
+    : "interactive" as const;
+
   const actor = {
     tokenId: guarded.user.agentTokenId ?? null,
     label: guarded.user.agentLabel ?? "codex",
@@ -62,7 +84,15 @@ export async function POST(req: Request) {
     route: "/api/agents/codex/runs",
     sessionId,
     projectId,
-    payload: { cwd, label, parentRunId, role, workspaceId },
+    payload: {
+      approvalMode,
+      cwd,
+      label,
+      parentRunId,
+      role,
+      workspaceFileCount: workspaceFiles.length,
+      workspaceId,
+    },
   });
 
   try {
@@ -77,6 +107,8 @@ export async function POST(req: Request) {
       role,
       label,
       metadata,
+      approvalMode,
+      workspaceFiles,
     });
 
     await recordAgentEvent({
@@ -88,11 +120,13 @@ export async function POST(req: Request) {
       projectId,
       payload: {
         agentId: run.agentId ?? null,
+        approvalMode,
         parentRunId: run.parentRunId ?? parentRunId,
         role,
         runId: run.runId,
         status: run.status,
         threadId: run.threadId ?? null,
+        workspaceFileCount: workspaceFiles.length,
       },
     });
 
@@ -106,7 +140,7 @@ export async function POST(req: Request) {
       route: "/api/agents/codex/runs",
       sessionId,
       projectId,
-      payload: { message, parentRunId, role },
+      payload: { approvalMode, message, parentRunId, role },
     });
     return NextResponse.json({ error: message }, { status: 503 });
   }
