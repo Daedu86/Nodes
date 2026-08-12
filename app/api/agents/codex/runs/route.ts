@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
+import { getSelectedAncestorArtifactRefs } from "@/lib/agents/codex/project-workspace-context";
 import { startCodexRun } from "@/lib/agents/codex/runner-client";
 import type { CodexAgentRole, StartCodexRunInput } from "@/lib/agents/codex/types";
 import {
   buildSessionWorkspaceFiles,
   hasTychoProtocolWorkspaceFile,
 } from "@/lib/agents/codex/session-workspace-files";
+import { getProject } from "@/lib/project-store";
+import type { SessionArtifact } from "@/lib/session-artifacts";
 import { recordAgentEvent } from "@/lib/server/agent-work";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
 import { getSession } from "@/lib/session-store";
@@ -22,6 +25,58 @@ const ROLES = new Set<CodexAgentRole>([
 
 const asOptionalString = (value: unknown) =>
   typeof value === "string" && value.trim() ? value.trim() : null;
+
+const loadSelectedAncestorArtifacts = async ({
+  ownerId,
+  projectId,
+  sessionId,
+}: {
+  ownerId: string;
+  projectId: string | null;
+  sessionId: string;
+}): Promise<SessionArtifact[]> => {
+  if (!projectId) return [];
+
+  const project = await getProject(projectId, ownerId).catch(() => null);
+  if (!project) return [];
+
+  const workloadNode = project.map.nodes.find(
+    (node) => node.primarySessionId === sessionId,
+  );
+  if (!workloadNode) return [];
+
+  const refs = getSelectedAncestorArtifactRefs(project.map, workloadNode.id);
+  if (refs.length === 0) return [];
+
+  const sessions = new Map<string, Awaited<ReturnType<typeof getSession>>>();
+  const artifacts: SessionArtifact[] = [];
+
+  for (const ref of refs) {
+    let sourceSession = sessions.get(ref.sessionId);
+    if (!sourceSession) {
+      sourceSession = await getSession(ref.sessionId, ownerId).catch(() => null);
+      if (!sourceSession) {
+        throw new Error(
+          `Selected upstream session is unavailable for workload execution: ${ref.sessionId}`,
+        );
+      }
+      sessions.set(ref.sessionId, sourceSession);
+    }
+
+    const requestedIds = new Set(ref.artifactIds);
+    const selected = sourceSession.artifacts.filter((artifact) => requestedIds.has(artifact.id));
+    const selectedIds = new Set(selected.map((artifact) => artifact.id));
+    const missingId = ref.artifactIds.find((artifactId) => !selectedIds.has(artifactId));
+    if (missingId) {
+      throw new Error(
+        `Selected upstream artifact is missing from session ${ref.sessionId}: ${missingId}`,
+      );
+    }
+    artifacts.push(...selected);
+  }
+
+  return artifacts;
+};
 
 export async function POST(req: Request) {
   const guarded = await requireLocalApiUser(req);
@@ -54,15 +109,25 @@ export async function POST(req: Request) {
   }
 
   let workspaceFiles;
+  let ancestorArtifactCount = 0;
   try {
-    workspaceFiles = buildSessionWorkspaceFiles(session.artifacts);
+    const ancestorArtifacts = await loadSelectedAncestorArtifacts({
+      ownerId: guarded.user.id,
+      projectId,
+      sessionId,
+    });
+    ancestorArtifactCount = ancestorArtifacts.length;
+    workspaceFiles = buildSessionWorkspaceFiles([
+      ...session.artifacts,
+      ...ancestorArtifacts,
+    ]);
   } catch (error) {
     return NextResponse.json(
       {
         error:
           error instanceof Error
             ? error.message
-            : "Unable to prepare primary-session workspace artifacts.",
+            : "Unable to prepare authoritative workload workspace artifacts.",
       },
       { status: 400 },
     );
@@ -85,6 +150,7 @@ export async function POST(req: Request) {
     sessionId,
     projectId,
     payload: {
+      ancestorArtifactCount,
       approvalMode,
       cwd,
       label,
@@ -120,6 +186,7 @@ export async function POST(req: Request) {
       projectId,
       payload: {
         agentId: run.agentId ?? null,
+        ancestorArtifactCount,
         approvalMode,
         parentRunId: run.parentRunId ?? parentRunId,
         role,
