@@ -9,7 +9,7 @@ This feature branch makes **Tycho experiment + Luna/Codex** the default executio
 | Nodes | project map, workload node, primary session, artifacts, upstream evidence, promotion history |
 | Luna/Codex | actor: forms the hypothesis, writes experiment code/protocol, interprets the structured result |
 | Tycho | isolated experiment execution, budgets, falsifier checks, structured promote/reject/blocked evidence |
-| Codex Runner | local authentication, exact project-id → workspace mapping, managed run lifecycle and approvals |
+| Codex Runner | local authentication, exact project-id → workspace mapping, Tycho isolation readiness, managed run lifecycle and approvals |
 
 Tycho never receives Codex/ChatGPT credentials. Nodes never receives arbitrary local filesystem paths. The existing Codex approval, SSE, cancellation, reconnect, and workspace-mapping boundaries remain unchanged.
 
@@ -26,6 +26,15 @@ tycho-experiment --doctor
 
 `tycho-experiment --doctor` must pass with Docker or Finch isolation. The generic experiment harness rejects host execution.
 
+The Nodes runner executes only that fixed doctor command during authenticated `/readyz` checks. It never accepts a Tycho executable, command, runtime, image, or filesystem path from the browser. Configure a non-default CLI path only on the runner machine with:
+
+```bash
+TYCHO_EXPERIMENT_BIN=tycho-experiment
+TYCHO_DOCTOR_TIMEOUT_MS=20000
+```
+
+The Canvas Runner remains disabled until readiness reports `tychoReady: true` with runtime `docker` or `finch`. A missing CLI, timeout, failed doctor, invalid output, or `host` runtime fails closed before Luna starts the workload.
+
 ## Workload protocol
 
 When the existing Runner starts a selected workload on this branch, the execution prompt requires Luna/Codex to preserve:
@@ -40,7 +49,7 @@ A rejected protocol is evidence and must not be overwritten. A revision receives
 
 ## Direct execution
 
-`buildProjectExecutionPrompt` still supports `mode: "direct"` for callers that explicitly need the previous direct Luna/Codex policy. The existing Canvas Runner does not pass a mode today, so this feature branch defaults it to Tycho. That keeps the experiment isolated to the branch without changing `main`.
+`buildProjectExecutionPrompt` still supports `mode: "direct"` for callers that explicitly need the previous direct Luna/Codex policy. The existing Canvas Runner does not pass a mode today, so this feature branch defaults it to Tycho. Because the Canvas Runner is Tycho-default on this branch, its Run button requires Tycho isolated readiness.
 
 ## Competition integrity
 
