@@ -5,6 +5,7 @@ import http from "node:http";
 import path from "node:path";
 import readline from "node:readline";
 import { readTychoReadiness } from "./tycho-readiness.mjs";
+import { materializeWorkspaceFiles } from "./workspace-artifacts.mjs";
 
 const PORT = Number(process.env.CODEX_RUNNER_PORT || 8787);
 const HOST = process.env.CODEX_RUNNER_HOST || "127.0.0.1";
@@ -174,6 +175,8 @@ function makeRunRecord(input) {
     cwd: input.cwd || null,
     role: input.role || "coder",
     label: input.label || "Codex Agent",
+    approvalMode: input.approvalMode === "tycho-isolated" ? "tycho-isolated" : "interactive",
+    workspaceArtifactPaths: Array.isArray(input.workspaceArtifactPaths) ? input.workspaceArtifactPaths : [],
     status: input.status || "queued",
     threadId: input.threadId || null,
     turnId: input.turnId || null,
@@ -205,12 +208,20 @@ function spawnChildRun(parentRun, params) {
     cwd: parentRun.cwd,
     role: "custom",
     label: asString(thread.name) || "Codex Subagent",
+    approvalMode: parentRun.approvalMode,
+    workspaceArtifactPaths: parentRun.workspaceArtifactPaths,
     status: "running",
     threadId: childThreadId,
   }));
   publish(parentRun, { method: "agent/child/spawned", params: { childRunId: child.runId, childThreadId, childAgentId: child.agentId, parentRunId: parentRun.runId, parentThreadId: parentRun.threadId, label: child.label, role: child.role } });
   publish(child, { method: "thread/started", params });
   return child;
+}
+
+function deniedApprovalResult(method) {
+  return method.toLowerCase().includes("permissions/requestapproval")
+    ? { scope: "turn", permissions: {} }
+    : { decision: "decline" };
 }
 
 class CodexAppServer {
@@ -286,6 +297,13 @@ class CodexAppServer {
     if (!run) { this.write({ id: message.id, result: { decision: AUTO_APPROVE ? "accept" : "decline" } }); return; }
 
     const approvalId = String(message.id);
+    if (run.approvalMode === "tycho-isolated") {
+      publish(run, { method: "approval/requested", params: { approvalId, approvalMethod: method, ...params } });
+      this.write({ id: message.id, result: deniedApprovalResult(method) });
+      publish(run, { method: "approval/resolved", params: { approvalId, decision: "decline", automatic: true, reason: "tycho-isolated sandbox boundary" } });
+      return;
+    }
+
     run.status = "waiting_for_approval";
     publish(run, { method: "approval/requested", params: { approvalId, approvalMethod: method, ...params } });
     if (AUTO_APPROVE) {
@@ -355,15 +373,36 @@ async function startRun(body, ownerId) {
   const parentRun = parentRunId ? runs.get(parentRunId) : null;
   if (parentRunId && (!parentRun || parentRun.ownerId !== ownerId)) throw new Error("Parent Codex run was not found for this owner.");
   const workspace = parentRun ? { workspaceId: parentRun.workspaceId, cwd: parentRun.cwd } : resolveWorkspace(body);
+  const approvalMode = parentRun?.approvalMode || (asString(body.approvalMode) === "tycho-isolated" ? "tycho-isolated" : "interactive");
+
+  let workspaceArtifacts = parentRun
+    ? { count: parentRun.workspaceArtifactPaths.length, created: 0, unchanged: parentRun.workspaceArtifactPaths.length, paths: parentRun.workspaceArtifactPaths }
+    : materializeWorkspaceFiles(workspace.cwd, body.workspaceFiles);
+
+  if (approvalMode === "tycho-isolated") {
+    const tycho = await readTychoReadiness();
+    if (!tycho.tychoReady || !["docker", "finch"].includes(tycho.tychoRuntime)) {
+      throw new Error("Tycho-isolated run requested, but Docker/Finch isolation is not ready.");
+    }
+    if (!workspaceArtifacts.paths.includes(".nodes/tycho-experiment.json")) {
+      throw new Error("Tycho-isolated run requires the authoritative .nodes/tycho-experiment.json primary-session artifact.");
+    }
+  }
+
   const runId = randomUUID();
-  const run = registerRun(makeRunRecord({ runId, agentId: asString(body.agentId) || `codex-${runId.slice(0, 8)}`, ownerId, parentRunId, sessionId: asString(body.sessionId), projectId: asString(body.projectId), workspaceId: workspace.workspaceId, cwd: workspace.cwd, role: asString(body.role) || "coder", label: asString(body.label) || (parentRun ? "Codex Subagent" : "Codex Agent") }));
+  const run = registerRun(makeRunRecord({ runId, agentId: asString(body.agentId) || `codex-${runId.slice(0, 8)}`, ownerId, parentRunId, sessionId: asString(body.sessionId), projectId: asString(body.projectId), workspaceId: workspace.workspaceId, cwd: workspace.cwd, role: asString(body.role) || "coder", label: asString(body.label) || (parentRun ? "Codex Subagent" : "Codex Agent"), approvalMode, workspaceArtifactPaths: workspaceArtifacts.paths }));
   try {
-    const threadResult = await codex.request("thread/start", { cwd: workspace.cwd, model: MODEL });
+    const threadParams = { cwd: workspace.cwd, model: MODEL };
+    if (approvalMode === "tycho-isolated") {
+      threadParams.approvalPolicy = "never";
+      threadParams.sandbox = "workspaceWrite";
+    }
+    const threadResult = await codex.request("thread/start", threadParams);
     const threadId = getNestedString(threadResult, ["thread", "id"]);
     if (!threadId) throw new Error("Codex did not return a thread id.");
     run.threadId = threadId;
     runByThreadId.set(threadId, runId);
-    publish(run, { method: "thread/started", params: { threadId, thread: threadResult.thread } });
+    publish(run, { method: "thread/started", params: { threadId, thread: threadResult.thread, approvalMode, workspaceArtifacts } });
     const turnResult = await codex.request("turn/start", { threadId, input: [{ type: "text", text: String(body.prompt || "") }] });
     const turnId = getNestedString(turnResult, ["turn", "id"]);
     if (!turnId) throw new Error("Codex did not return a turn id.");
