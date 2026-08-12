@@ -7,6 +7,11 @@ import type {
   CodexPersistedRun,
   CodexRunStatus,
 } from "@/lib/agents/codex/types";
+import {
+  getProjectForUser,
+  patchProjectForUser,
+} from "@/lib/project-collaboration";
+import { normalizeProjectMap } from "@/lib/project-map";
 import { getAgentWorkRepository } from "@/lib/persistence/repositories";
 import { recordAgentEvent } from "@/lib/server/agent-work";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
@@ -28,6 +33,7 @@ const STATUSES = new Set<CodexRunStatus>([
   "failed",
   "cancelled",
 ]);
+const ACTIVE_STATUSES = new Set<CodexRunStatus>(["queued", "running", "waiting_for_approval"]);
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -128,6 +134,130 @@ const sanitizeSnapshot = (value: unknown, sessionId: string): CodexCanvasSnapsho
   };
 };
 
+const requiredEvidenceMarker = (description: string) =>
+  description.match(/\bmust\s+satisfy\s+([a-z0-9._-]+)/i)?.[1]?.trim() ?? null;
+
+const eventEvidenceText = (event: CodexCanvasEvent) => {
+  if (event.type !== "file.changed") return "";
+  const params = asRecord(event.payload)?.params;
+  const record = asRecord(params);
+  const item = asRecord(record?.item);
+  return [
+    asNullableString(record?.path),
+    asNullableString(record?.filePath),
+    asNullableString(item?.path),
+    asNullableString(item?.filePath),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join("\n");
+};
+
+const runMatchesWorkload = (
+  run: CodexPersistedRun,
+  projectId: string,
+  workloadTitle: string,
+) =>
+  run.prompt.includes(`Project id: ${projectId}`) &&
+  run.prompt.includes(`Workload: ${workloadTitle}`);
+
+const evidenceForRun = (
+  run: CodexPersistedRun,
+  session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
+  marker: string | null,
+) => {
+  const evidenceArtifacts = session.artifacts.filter((artifact) => artifact.semanticType === "evidence");
+  if (!marker) {
+    return {
+      ok: true,
+      artifactIds: evidenceArtifacts.map((artifact) => artifact.id),
+    };
+  }
+
+  const normalizedMarker = marker.toLowerCase();
+  const matchingArtifacts = evidenceArtifacts.filter((artifact) =>
+    [artifact.title, artifact.fileName ?? "", artifact.content]
+      .join("\n")
+      .toLowerCase()
+      .includes(normalizedMarker),
+  );
+  const outputMatches = run.output.toLowerCase().includes(normalizedMarker);
+  const changedFileMatches = run.events.some((event) =>
+    eventEvidenceText(event).toLowerCase().includes(normalizedMarker),
+  );
+
+  return {
+    ok: matchingArtifacts.length > 0 || outputMatches || changedFileMatches,
+    artifactIds: matchingArtifacts.map((artifact) => artifact.id),
+  };
+};
+
+const reconcileProjectRunSnapshot = async ({
+  snapshot,
+  session,
+  user,
+}: {
+  snapshot: CodexCanvasSnapshot;
+  session: NonNullable<Awaited<ReturnType<typeof getSession>>>;
+  user: Parameters<typeof getProjectForUser>[1];
+}) => {
+  const projectId = snapshot.projectId;
+  if (!projectId) return { status: "skipped", reason: "no-project" } as const;
+
+  const project = await getProjectForUser(projectId, user).catch(() => null);
+  if (!project || project.accessRole !== "owner") {
+    return { status: "skipped", reason: "project-unavailable" } as const;
+  }
+
+  const map = normalizeProjectMap(project.map);
+  const node = map.nodes.find((entry) => entry.primarySessionId === session.id);
+  if (!node) return { status: "skipped", reason: "session-not-mapped" } as const;
+
+  const run = [...snapshot.runs]
+    .reverse()
+    .find((entry) => runMatchesWorkload(entry, project.id, node.title));
+  if (!run) return { status: "skipped", reason: "workload-run-not-found" } as const;
+
+  const marker = requiredEvidenceMarker(node.description);
+  const evidence = evidenceForRun(run, session, marker);
+  const summary = run.output.trim() || run.error?.trim() || `Managed Codex run ${run.status}.`;
+  const nextNode = { ...node };
+
+  if (ACTIVE_STATUSES.has(run.status)) {
+    nextNode.status = "active";
+    nextNode.selectedOutput = null;
+  } else if (run.status === "completed" && evidence.ok) {
+    nextNode.status = "complete";
+    nextNode.selectedOutput = {
+      artifactIds: evidence.artifactIds,
+      messageId: null,
+      sessionId: session.id,
+      summary,
+      updatedAt: snapshot.updatedAt,
+    };
+  } else {
+    nextNode.status = "blocked";
+    nextNode.selectedOutput = {
+      artifactIds: evidence.artifactIds,
+      messageId: null,
+      sessionId: session.id,
+      summary:
+        run.status === "completed" && marker && !evidence.ok
+          ? `${summary}\n\nReconciliation blocked: required evidence marker ${marker} was not found in session evidence, run output, or changed-file evidence.`
+          : summary,
+      updatedAt: snapshot.updatedAt,
+    };
+  }
+
+  const nodes = map.nodes.map((entry) => entry.id === node.id ? nextNode : entry);
+  const nextMap = normalizeProjectMap({ ...map, nodes });
+  if (JSON.stringify(nextMap) === JSON.stringify(map)) {
+    return { status: "unchanged", nodeId: node.id, nodeStatus: nextNode.status } as const;
+  }
+
+  await patchProjectForUser(project.id, { map: nextMap }, user);
+  return { status: "updated", nodeId: node.id, nodeStatus: nextNode.status } as const;
+};
+
 export async function GET(req: Request) {
   const guarded = await requireLocalApiUser(req);
   if ("response" in guarded) return guarded.response;
@@ -179,5 +309,18 @@ export async function POST(req: Request) {
     payload: { snapshot },
   });
 
-  return NextResponse.json({ ok: true, updatedAt: snapshot.updatedAt });
+  const reconciliation = await reconcileProjectRunSnapshot({
+    snapshot,
+    session,
+    user: guarded.user,
+  }).catch((error) => ({
+    status: "error" as const,
+    reason: error instanceof Error ? error.message : "Project workload reconciliation failed.",
+  }));
+
+  return NextResponse.json({
+    ok: true,
+    updatedAt: snapshot.updatedAt,
+    reconciliation,
+  });
 }
