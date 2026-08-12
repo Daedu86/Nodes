@@ -23,14 +23,19 @@ if (patched === source && !source.includes(after)) {
 
 // server.mjs is executed from a generated file under /tmp. Relative module
 // imports would therefore resolve against /tmp rather than this runner
-// directory. Rewrite the known local Tycho readiness import to an absolute
-// file URL before writing the generated runtime module.
-const tychoImport = 'from "./tycho-readiness.mjs";';
-const tychoImportUrl = pathToFileURL(path.join(runnerDir, "tycho-readiness.mjs")).href;
-if (!patched.includes(tychoImport)) {
-  throw new Error("Unable to bind Tycho readiness module: expected relative import was not found.");
-}
-patched = patched.replace(tychoImport, `from ${JSON.stringify(tychoImportUrl)};`);
+// directory. Rewrite known runner-local imports to absolute file URLs before
+// writing the generated runtime module.
+const bindLocalImport = (input, fileName) => {
+  const relativeImport = `from "./${fileName}";`;
+  if (!input.includes(relativeImport)) {
+    throw new Error(`Unable to bind runner-local module: ${fileName}`);
+  }
+  const fileUrl = pathToFileURL(path.join(runnerDir, fileName)).href;
+  return input.replace(relativeImport, `from ${JSON.stringify(fileUrl)};`);
+};
+
+patched = bindLocalImport(patched, "tycho-readiness.mjs");
+patched = bindLocalImport(patched, "workspace-artifacts.mjs");
 
 const runtimePath = path.join(os.tmpdir(), `nodes-codex-runner-${process.pid}.mjs`);
 await writeFile(runtimePath, patched, "utf8");
