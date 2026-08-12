@@ -19,6 +19,15 @@ export type CodexApprovalDecision =
   | "decline"
   | "cancel";
 
+export type CodexRunnerApprovalMode = "interactive" | "tycho-isolated";
+
+export type CodexWorkspaceFile = {
+  path: string;
+  content: string;
+  artifactId?: string | null;
+  mimeType?: string | null;
+};
+
 export type StartCodexRunInput = {
   sessionId: string;
   prompt: string;
@@ -33,6 +42,8 @@ export type StartCodexRunInput = {
 
 export type CodexRunnerStartRequest = StartCodexRunInput & {
   ownerId: string;
+  approvalMode?: CodexRunnerApprovalMode;
+  workspaceFiles?: CodexWorkspaceFile[];
 };
 
 export type CodexRunnerStartResponse = {
