@@ -16,10 +16,21 @@ const source = await readFile(sourcePath, "utf8");
 const before = 'publish(run, { method: "approval/requested", params: { approvalId, approvalMethod: method, ...params } });';
 const after = 'publish(run, { method: "approval/requested", params: { ...params, approvalMethod: method, approvalId } });';
 
-const patched = source.includes(before) ? source.replace(before, after) : source;
+let patched = source.includes(before) ? source.replace(before, after) : source;
 if (patched === source && !source.includes(after)) {
   throw new Error("Unable to apply Codex approval compatibility patch: expected approval publish statement was not found.");
 }
+
+// server.mjs is executed from a generated file under /tmp. Relative module
+// imports would therefore resolve against /tmp rather than this runner
+// directory. Rewrite the known local Tycho readiness import to an absolute
+// file URL before writing the generated runtime module.
+const tychoImport = 'from "./tycho-readiness.mjs";';
+const tychoImportUrl = pathToFileURL(path.join(runnerDir, "tycho-readiness.mjs")).href;
+if (!patched.includes(tychoImport)) {
+  throw new Error("Unable to bind Tycho readiness module: expected relative import was not found.");
+}
+patched = patched.replace(tychoImport, `from ${JSON.stringify(tychoImportUrl)};`);
 
 const runtimePath = path.join(os.tmpdir(), `nodes-codex-runner-${process.pid}.mjs`);
 await writeFile(runtimePath, patched, "utf8");
