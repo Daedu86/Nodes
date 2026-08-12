@@ -7,8 +7,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "node --check server.mjs && node --check server-launcher.mjs && node --check tycho-readiness.mjs",
-    "test": "node --test tycho-readiness.test.mjs",
+    "check": "node --check server.mjs && node --check server-launcher.mjs && node --check tycho-readiness.mjs && node --check workspace-artifacts.mjs",
+    "test": "node --test tycho-readiness.test.mjs workspace-artifacts.test.mjs",
     "start": "node server-launcher.mjs",
     "start:env": "node --env-file=.env server-launcher.mjs",
     "dev": "node --watch server-launcher.mjs",
