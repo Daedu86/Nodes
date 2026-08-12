@@ -4,6 +4,7 @@ import { existsSync, statSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import readline from "node:readline";
+import { readTychoReadiness } from "./tycho-readiness.mjs";
 
 const PORT = Number(process.env.CODEX_RUNNER_PORT || 8787);
 const HOST = process.env.CODEX_RUNNER_HOST || "127.0.0.1";
@@ -397,8 +398,20 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === "/readyz" && req.method === "GET") {
       await codex.ensureStarted();
-      const account = await codex.request("account/read", {});
-      return json(res, 200, { ok: true, codexRunning: true, model: MODEL, authenticated: Boolean(account), workspaceCount: WORKSPACES.size, workspaceIds: [...WORKSPACES.keys()], hasDefaultWorkspace: Boolean(DEFAULT_CWD) });
+      const [account, tycho] = await Promise.all([
+        codex.request("account/read", {}),
+        readTychoReadiness(),
+      ]);
+      return json(res, 200, {
+        ok: true,
+        codexRunning: true,
+        model: MODEL,
+        authenticated: Boolean(account),
+        workspaceCount: WORKSPACES.size,
+        workspaceIds: [...WORKSPACES.keys()],
+        hasDefaultWorkspace: Boolean(DEFAULT_CWD),
+        ...tycho,
+      });
     }
 
     if (url.pathname === "/v1/account/usage" && req.method === "GET") {

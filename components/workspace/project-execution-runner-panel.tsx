@@ -36,7 +36,14 @@ import {
 import type { SessionDocument } from "@/lib/session-documents";
 
 type RunnerNextStep = {
-  code: "ready" | "configure_runner" | "start_runner" | "authenticate" | "configure_workspace";
+  code:
+    | "ready"
+    | "configure_runner"
+    | "start_runner"
+    | "update_runner"
+    | "authenticate"
+    | "configure_workspace"
+    | "configure_tycho";
   title: string;
   detail: string;
   command?: string;
@@ -52,6 +59,10 @@ type RunnerStatus = {
   workspaceCount: number;
   hasDefaultWorkspace: boolean;
   workspaceConfigured: boolean;
+  tychoReady: boolean;
+  tychoRuntime: string | null;
+  tychoImage: string | null;
+  tychoStatus: string | null;
   nextStep: RunnerNextStep;
 };
 
@@ -221,12 +232,14 @@ export function ProjectExecutionRunnerPanel({
   }, [open, refreshStatus]);
 
   const workspaceReady = Boolean(status?.workspaceConfigured);
+  const tychoReady = Boolean(status?.tychoReady);
   const canRun = Boolean(
     project.accessRole === "owner" &&
       status?.reachable &&
       status.codexRunning &&
       status.authenticated &&
       workspaceReady &&
+      tychoReady &&
       selectedNode &&
       selectedSessionId,
   );
@@ -318,7 +331,7 @@ export function ProjectExecutionRunnerPanel({
           </div>
           <SheetTitle>Project / session execution</SheetTitle>
           <SheetDescription>
-            Codex authentication stays on the runner machine. Nodes stores only project/session execution context.
+            Codex authentication stays on the runner machine. Tycho experiment execution must pass isolated Docker/Finch readiness before this branch enables Run.
           </SheetDescription>
         </SheetHeader>
 
@@ -336,6 +349,7 @@ export function ProjectExecutionRunnerPanel({
               {statusPill(Boolean(status?.reachable), "Runner online", "Runner offline")}
               {statusPill(Boolean(status?.authenticated), "Codex authenticated", "Authentication required")}
               {statusPill(workspaceReady, "Project workspace mapped", "Project workspace required")}
+              {statusPill(tychoReady, "Tycho isolated", "Tycho required")}
             </div>
 
             <div className="mt-3 rounded-xl border border-border/60 bg-background p-3">
@@ -355,7 +369,7 @@ export function ProjectExecutionRunnerPanel({
                   {effectiveNextStep?.command ? (
                     <div className="mt-2 flex items-center gap-2 rounded-lg border border-border/60 bg-muted/30 px-2 py-2">
                       <code className="min-w-0 flex-1 truncate text-xs">{effectiveNextStep.command}</code>
-                      <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void copyCommand(effectiveNextStep.command!)} aria-label="Copy authentication command">
+                      <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void copyCommand(effectiveNextStep.command!)} aria-label="Copy runner command">
                         <Clipboard className="h-3.5 w-3.5" />
                       </Button>
                     </div>
@@ -366,6 +380,12 @@ export function ProjectExecutionRunnerPanel({
 
             {status?.model ? (
               <p className="mt-2 text-xs text-muted-foreground">Model: <span className="font-medium text-foreground">{status.model}</span></p>
+            ) : null}
+            {status?.tychoReady ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Tycho: <span className="font-medium text-foreground">{status.tychoRuntime ?? "isolated"}</span>
+                {status.tychoImage ? <> · <span className="font-medium text-foreground">{status.tychoImage}</span></> : null}
+              </p>
             ) : null}
           </section>
 
@@ -392,7 +412,7 @@ export function ProjectExecutionRunnerPanel({
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Runner workspace key</p>
             <code className="mt-2 block overflow-x-auto rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-xs">{project.id}</code>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              Managed project runs use the project id as the workspace key. The runner now verifies this exact key in CODEX_WORKSPACES_JSON; no filesystem path is accepted from the browser.
+              Managed project runs use the project id as the workspace key. The runner verifies this exact key in CODEX_WORKSPACES_JSON; no filesystem path is accepted from the browser.
             </p>
           </section>
 
@@ -436,7 +456,7 @@ export function ProjectExecutionRunnerPanel({
             <div className="flex items-start gap-2">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
               <p className="text-xs leading-5 text-muted-foreground">
-                Authentication files never pass through the project, session, Supabase, or browser. Managed runs persist in the session Codex snapshot and use the existing SSE, cancel, and approval flow.
+                Authentication files never pass through the project, session, Supabase, or browser. Tycho experiment scripts run only after the runner verifies an isolated Docker/Finch sandbox; host fallback is not accepted.
               </p>
             </div>
           </section>
@@ -451,7 +471,7 @@ export function ProjectExecutionRunnerPanel({
           </Button>
           {!canRun ? (
             <p className="text-center text-[11px] leading-4 text-muted-foreground">
-              Run unlocks after runner + authentication + exact project workspace mapping + selected session are ready.
+              Run unlocks after runner + authentication + exact project workspace mapping + Tycho Docker/Finch isolation + selected session are ready.
             </p>
           ) : null}
         </SheetFooter>
