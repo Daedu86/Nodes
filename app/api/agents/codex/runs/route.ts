@@ -6,6 +6,7 @@ import {
   buildSessionWorkspaceFiles,
   hasTychoProtocolWorkspaceFile,
 } from "@/lib/agents/codex/session-workspace-files";
+import { normalizeProjectMap } from "@/lib/project-map";
 import { getProject } from "@/lib/project-store";
 import type { SessionArtifact } from "@/lib/session-artifacts";
 import { recordAgentEvent } from "@/lib/server/agent-work";
@@ -40,12 +41,13 @@ const loadSelectedAncestorArtifacts = async ({
   const project = await getProject(projectId, ownerId).catch(() => null);
   if (!project) return [];
 
-  const workloadNode = project.map.nodes.find(
+  const map = normalizeProjectMap(project.map);
+  const workloadNode = map.nodes.find(
     (node) => node.primarySessionId === sessionId,
   );
   if (!workloadNode) return [];
 
-  const refs = getSelectedAncestorArtifactRefs(project.map, workloadNode.id);
+  const refs = getSelectedAncestorArtifactRefs(map, workloadNode.id);
   if (refs.length === 0) return [];
 
   const sessions = new Map<string, Awaited<ReturnType<typeof getSession>>>();
