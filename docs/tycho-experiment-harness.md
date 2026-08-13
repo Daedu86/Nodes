@@ -47,6 +47,25 @@ The Tycho harness executes only Python scripts inside the configured project wor
 
 A rejected protocol is evidence and must not be overwritten. A revision receives a new experiment id. The workload prompt allows at most one evidence-driven revision inside one workload; broader search should become another Nodes iteration so the project map preserves causal history.
 
+## Evolution loop (M1)
+
+`lib/tycho-evolution-loop.ts` adds the backend-neutral orchestration primitive for controlled multi-candidate search:
+
+```text
+parent candidate
+  -> generate N variants
+  -> execute variants in parallel
+  -> evaluate successful executions
+  -> select one deterministic winner
+  -> use that winner as the next generation's parent
+```
+
+Candidate generation and experiment execution are intentionally separate responsibilities. The current integration can use Luna/Codex (or another strategy) to formulate candidate hypotheses while a Tycho-backed `EvolutionExecutionBackend` performs isolated experiment work. A future optimizer can replace the generator, and a future kagent/Kubernetes backend can replace execution, without changing the evolution or winner-selection semantics.
+
+Each generation records candidate provenance (`generation`, `key`, `parentKey`), execution output, evaluation evidence, and isolated execution/evaluation failures. Candidates execute concurrently; one failed candidate does not cancel healthy siblings. A generation fails closed when no candidate can be successfully evaluated. Equal scores are resolved deterministically by generator order so repeated evaluation does not depend on completion timing.
+
+M1 is deliberately an orchestration contract rather than browser or credential logic. Browser clients still do not choose executables, filesystem paths, sandbox credentials, or cluster credentials. Concrete Tycho-runner and kagent/Kubernetes execution adapters remain behind the `EvolutionExecutionBackend` boundary.
+
 ## Direct execution
 
 `buildProjectExecutionPrompt` still supports `mode: "direct"` for callers that explicitly need the previous direct Luna/Codex policy. The existing Canvas Runner does not pass a mode today, so this feature branch defaults it to Tycho. Because the Canvas Runner is Tycho-default on this branch, its Run button requires Tycho isolated readiness.
