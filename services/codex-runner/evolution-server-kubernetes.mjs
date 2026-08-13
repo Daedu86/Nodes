@@ -1,16 +1,16 @@
 import http from "node:http";
 
+import { createCurriculumEvolutionOrchestrator } from "./curriculum-evolution-orchestrator.mjs";
 import { readEvolutionRunnerConfig } from "./evolution-config.mjs";
 import { readKagentEvolutionReadiness } from "./kagent-readiness.mjs";
 import { createKubernetesEvolutionBackend } from "./kubernetes-evolution-backend.mjs";
-import { createLearningEvolutionOrchestrator } from "./learning-evolution-orchestrator.mjs";
 
 const RUNNER_CONFIG = readEvolutionRunnerConfig();
 const PORT = RUNNER_CONFIG.port;
 const HOST = process.env.CODEX_RUNNER_HOST || "127.0.0.1";
 const RUNNER_TOKEN = process.env.CODEX_RUNNER_TOKEN?.trim() || null;
 const backend = createKubernetesEvolutionBackend();
-const durable = createLearningEvolutionOrchestrator({ host: "127.0.0.1", evolutionPort: PORT, token: RUNNER_TOKEN });
+const durable = createCurriculumEvolutionOrchestrator({ host: "127.0.0.1", evolutionPort: PORT, token: RUNNER_TOKEN });
 
 const asString = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
 
@@ -81,6 +81,20 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/v1/evolution/learning/status" && req.method === "GET") {
       return json(res, 200, await durable.learningStatus());
+    }
+
+    if (url.pathname === "/v1/evolution/curriculum/status" && req.method === "GET") {
+      const workspaceId = asString(url.searchParams.get("workspaceId"));
+      return json(res, 200, await durable.curriculumReport(workspaceId));
+    }
+
+    if (url.pathname === "/v1/evolution/curriculum/plan" && req.method === "POST") {
+      const body = await readJson(req);
+      return json(res, 200, await durable.curriculumPlan({
+        workspaceId: asString(body.workspaceId),
+        generation: Number(body.generation) || 1,
+        defaultDomain: asString(body.domain) || "general-evolution",
+      }));
     }
 
     if (url.pathname === "/v1/evolution/learning/replay" && req.method === "GET") {
