@@ -160,10 +160,11 @@ export function parseEvolutionSessionSnapshot(value: unknown): EvolutionSessionS
   }
 
   if (value.champion !== null) {
-    if (!isCandidateSnapshot(value.champion) || !isRecord(value.champion.spec)) return null;
+    const championSpec = isRecord(value.champion) ? value.champion.spec : null;
+    if (!isCandidateSnapshot(value.champion) || !isRecord(championSpec)) return null;
     if (
-      typeof value.champion.spec.experimentId !== "string" ||
-      !isRecord(value.champion.spec.protocol)
+      typeof championSpec.experimentId !== "string" ||
+      !isRecord(championSpec.protocol)
     ) {
       return null;
     }
