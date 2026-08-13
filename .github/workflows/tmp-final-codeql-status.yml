@@ -74,3 +74,5 @@ jobs:
           git add .tmp-codeql/final-verification.json .tmp-codeql/final-verification.md
           git commit -m "chore: capture final CodeQL verification [skip vercel]"
           git push origin HEAD:main
+
+# Triggered after runner security fixes on 2026-08-13.
