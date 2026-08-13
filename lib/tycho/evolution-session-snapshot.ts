@@ -98,7 +98,7 @@ const isSnapshotStatus = (value: unknown): value is EvolutionSessionSnapshot["st
 const isGenerationStatus = (value: unknown): value is EvolutionGenerationSnapshot["status"] =>
   value === "completed" || value === "failed";
 
-const nullableString = (value: unknown) =>
+const nullableString = (value: unknown): value is string | null =>
   value === null || typeof value === "string";
 
 const finiteOrNull = (value: unknown) =>
