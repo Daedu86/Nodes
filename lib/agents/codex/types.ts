@@ -28,6 +28,13 @@ export type CodexWorkspaceFile = {
   mimeType?: string | null;
 };
 
+export type CodexModelOption = {
+  model: string;
+  displayName: string;
+  supportedReasoningEfforts: string[];
+  defaultReasoningEffort: string | null;
+};
+
 export type StartCodexRunInput = {
   sessionId: string;
   prompt: string;
@@ -38,6 +45,8 @@ export type StartCodexRunInput = {
   role?: CodexAgentRole;
   label?: string | null;
   metadata?: Record<string, unknown>;
+  model?: string | null;
+  reasoningEffort?: string | null;
 };
 
 export type CodexRunnerStartRequest = StartCodexRunInput & {
@@ -52,6 +61,8 @@ export type CodexRunnerStartResponse = {
   status: CodexRunStatus;
   agentId?: string | null;
   parentRunId?: string | null;
+  model?: string | null;
+  reasoningEffort?: string | null;
 };
 
 export type CodexCanvasEventType =
