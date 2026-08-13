@@ -1,7 +1,10 @@
 import {
-  existsSync,
+  closeSync,
+  constants,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
@@ -84,11 +87,44 @@ function assertNoSymlinkComponents(root, target) {
   let current = root;
   for (const part of parts) {
     current = path.join(current, part);
-    if (!existsSync(current)) continue;
-    const stat = lstatSync(current);
+    let stat;
+    try {
+      stat = lstatSync(current);
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
     if (stat.isSymbolicLink()) {
       throw new Error(`Workspace artifact path traverses a symbolic link: ${relative}`);
     }
+  }
+}
+
+function readExistingRegularFile(target, relativePath) {
+  let fd;
+  try {
+    fd = openSync(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) {
+      throw new Error(`Workspace artifact target is not a regular file: ${relativePath}`);
+    }
+    return readFileSync(fd, "utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function assertMatchingExistingFile(file, current) {
+  if (current !== file.content) {
+    throw new Error(
+      `Workspace artifact conflict: ${file.path} differs from the authoritative primary-session artifact.`,
+    );
   }
 }
 
@@ -105,27 +141,27 @@ export function materializeWorkspaceFiles(cwd, value) {
     mkdirSync(parent, { recursive: true });
     assertNoSymlinkComponents(root, parent);
 
-    if (existsSync(target)) {
-      const stat = lstatSync(target);
-      if (stat.isSymbolicLink() || !stat.isFile()) {
-        throw new Error(`Workspace artifact target is not a regular file: ${file.path}`);
-      }
-      const current = readFileSync(target, "utf8");
-      if (current !== file.content) {
-        throw new Error(
-          `Workspace artifact conflict: ${file.path} differs from the authoritative primary-session artifact.`,
-        );
-      }
+    const current = readExistingRegularFile(target, file.path);
+    if (current !== null) {
+      assertMatchingExistingFile(file, current);
       unchanged += 1;
       continue;
     }
 
-    writeFileSync(target, file.content, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
-    created += 1;
+    try {
+      writeFileSync(target, file.content, {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      });
+      created += 1;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      const raced = readExistingRegularFile(target, file.path);
+      if (raced === null) throw error;
+      assertMatchingExistingFile(file, raced);
+      unchanged += 1;
+    }
   }
 
   return {

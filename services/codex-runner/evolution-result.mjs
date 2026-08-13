@@ -1,4 +1,10 @@
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
+  readFileSync,
+} from "node:fs";
 import path from "node:path";
 
 export const TYCHO_RESULT_PATH = ".nodes/tycho-result.json";
@@ -64,21 +70,32 @@ export function readTychoEvolutionResult(cwd, expectedExperimentId = null) {
   if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error("Tycho result path escaped the evolution workspace.");
   }
-  if (!existsSync(target)) throw new Error("Tycho result file was not produced.");
 
-  const stat = lstatSync(target);
-  if (stat.isSymbolicLink() || !stat.isFile()) {
-    throw new Error("Tycho result path is not a regular file.");
-  }
-  if (stat.size > MAX_RESULT_BYTES) {
-    throw new Error("Tycho result exceeds the runner result-size budget.");
-  }
-
-  let parsed;
+  let fd;
   try {
-    parsed = JSON.parse(readFileSync(target, "utf8"));
+    fd = openSync(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   } catch (error) {
-    throw new Error(`Unable to parse Tycho result JSON: ${error instanceof Error ? error.message : String(error)}`);
+    if (error?.code === "ENOENT") throw new Error("Tycho result file was not produced.");
+    throw error;
   }
-  return parseTychoEvolutionResult(parsed, expectedExperimentId);
+
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) {
+      throw new Error("Tycho result path is not a regular file.");
+    }
+    if (stat.size > MAX_RESULT_BYTES) {
+      throw new Error("Tycho result exceeds the runner result-size budget.");
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync(fd, "utf8"));
+    } catch (error) {
+      throw new Error(`Unable to parse Tycho result JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return parseTychoEvolutionResult(parsed, expectedExperimentId);
+  } finally {
+    closeSync(fd);
+  }
 }
