@@ -1,5 +1,6 @@
 import type {
   CodexApprovalDecision,
+  CodexModelOption,
   CodexRunnerStartRequest,
   CodexRunnerStartResponse,
 } from "@/lib/agents/codex/types";
@@ -64,6 +65,9 @@ export type CodexRunnerReadiness = {
   codexRunning: boolean;
   authenticated: boolean;
   model: string | null;
+  defaultModel: string | null;
+  defaultReasoningEffort: string | null;
+  models: CodexModelOption[];
   workspaceCount: number;
   workspaceIds: string[];
   workspaceIdsSupported: boolean;
@@ -81,6 +85,28 @@ const stringArrayField = (value: unknown) =>
   Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
     : [];
+
+const modelOptionsField = (value: unknown): CodexModelOption[] => {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const record = entry as Record<string, unknown>;
+    const model = typeof record.model === "string" ? record.model.trim() : "";
+    if (!model) return [];
+    return [{
+      model,
+      displayName:
+        typeof record.displayName === "string" && record.displayName.trim()
+          ? record.displayName.trim()
+          : model,
+      supportedReasoningEfforts: stringArrayField(record.supportedReasoningEfforts),
+      defaultReasoningEffort:
+        typeof record.defaultReasoningEffort === "string" && record.defaultReasoningEffort.trim()
+          ? record.defaultReasoningEffort.trim()
+          : null,
+    }];
+  });
+};
 
 export async function getCodexRunnerReadiness(
   ownerId: string,
@@ -114,6 +140,11 @@ export async function getCodexRunnerReadiness(
     codexRunning: ready.codexRunning === true || health.codexRunning === true,
     authenticated: ready.authenticated === true,
     model: stringField(ready.model) ?? stringField(health.model),
+    defaultModel:
+      stringField(ready.defaultModel) ?? stringField(ready.model) ?? stringField(health.model),
+    defaultReasoningEffort:
+      stringField(ready.defaultReasoningEffort) ?? stringField(health.reasoningEffort),
+    models: modelOptionsField(ready.models),
     workspaceCount: numberField(ready.workspaceCount ?? health.workspaceCount),
     workspaceIds: stringArrayField(ready.workspaceIds),
     workspaceIdsSupported: Array.isArray(ready.workspaceIds),
@@ -150,6 +181,11 @@ export async function startCodexRun(
     status: body.status ?? "queued",
     agentId: typeof body.agentId === "string" ? body.agentId : null,
     parentRunId: typeof body.parentRunId === "string" ? body.parentRunId : input.parentRunId ?? null,
+    model: typeof body.model === "string" ? body.model : input.model ?? null,
+    reasoningEffort:
+      typeof body.reasoningEffort === "string"
+        ? body.reasoningEffort
+        : input.reasoningEffort ?? null,
   };
 }
 
