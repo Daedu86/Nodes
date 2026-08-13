@@ -171,7 +171,7 @@ test("durable orchestrator cancellation propagates to active Tycho child runs", 
   const orchestrator = createDurableEvolutionOrchestrator({
     stateDir,
     evolutionPort: fake.port,
-    generateVariants: async (input) => ({
+    generateVariants: async () => ({
       generatorRunId: "generator-1",
       variants: [variant("one", "exp-one")],
     }),
