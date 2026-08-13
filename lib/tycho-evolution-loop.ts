@@ -30,6 +30,7 @@ export type EvolutionVariantGenerator<TSpec, TContext = undefined> = {
     count: number;
     generation: number;
     parent: EvolutionCandidate<TSpec>;
+    parentEvaluation: EvolutionEvaluation | null;
   }) => Promise<readonly TychoVariant<TSpec>[]>;
 };
 
@@ -232,6 +233,7 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
   };
   const generations: EvolutionGeneration<TSpec, TExecution>[] = [];
   let parent = seed;
+  let parentEvaluation: EvolutionEvaluation | null = null;
   let latestWinner: EvolutionAttempt<TSpec, TExecution> | null = null;
 
   const recordGeneration = async (
@@ -255,6 +257,7 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
         count: input.populationSize,
         generation,
         parent,
+        parentEvaluation,
       });
     } catch (error) {
       const reason = `Generation ${generation} variant generation failed: ${toErrorMessage(error)}`;
@@ -364,6 +367,7 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
       winner,
     }, latestWinner);
     parent = winner.candidate;
+    parentEvaluation = winner.evaluation;
   }
 
   if (!latestWinner) {
