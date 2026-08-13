@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CodexGeneratorApprovalRequiredError,
+  CodexGeneratorSideEffectError,
   consumeCodexGeneratorStream,
 } from "../lib/tycho/codex-evolution-run-output";
 
@@ -58,6 +59,17 @@ describe("Codex evolution generator stream", () => {
         }),
       ),
     ).rejects.toBeInstanceOf(CodexGeneratorApprovalRequiredError);
+  });
+
+  it.each([
+    ["shell execution", { method: "item/started", params: { item: { type: "shellCommand" } } }],
+    ["tool execution", { method: "item/started", params: { item: { type: "toolCall" } } }],
+    ["file mutation", { method: "item/completed", params: { item: { type: "filePatch" } } }],
+    ["child agent", { method: "agent/child/spawned", params: { agentId: "child-1" } }],
+  ])("fails closed on %s during hypothesis generation", async (_label, notification) => {
+    await expect(consume(sseResponse(notification))).rejects.toBeInstanceOf(
+      CodexGeneratorSideEffectError,
+    );
   });
 
   it("propagates failed runs instead of parsing partial output", async () => {
