@@ -1,31 +1,6 @@
 {
   "analysisFoundForCommit": true,
-  "commitSha": "cc51c8815f41c18917d7ed2222bdd076fecd8437",
-  "openAlertCount": 4,
-  "alerts": [
-    {
-      "number": 37,
-      "rule": "js/log-injection",
-      "path": "services/nooa-runner/server.mjs",
-      "startLine": 417
-    },
-    {
-      "number": 36,
-      "rule": "js/log-injection",
-      "path": "services/codex-runner/server.mjs",
-      "startLine": 515
-    },
-    {
-      "number": 35,
-      "rule": "js/log-injection",
-      "path": "services/codex-runner/evolution-server.mjs",
-      "startLine": 345
-    },
-    {
-      "number": 34,
-      "rule": "js/log-injection",
-      "path": "services/codex-runner/evolution-server-kubernetes.mjs",
-      "startLine": 163
-    }
-  ]
+  "commitSha": "612203375384945d6d59a52981b7d9c5344e2d49",
+  "openAlertCount": 0,
+  "alerts": []
 }
