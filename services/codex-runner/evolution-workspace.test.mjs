@@ -32,12 +32,12 @@ test("creates an isolated candidate workspace and overrides authoritative .nodes
   assert.equal(existsSync(workspace.cwd), false);
 });
 
-test("skips symlinks and heavy generated directories", () => {
+test("skips symlinks and generated directories at any depth", () => {
   const source = tempDir("nodes-evolution-source-");
   const outside = tempDir("nodes-evolution-outside-");
   const tempRoot = tempDir("nodes-evolution-runs-");
-  mkdirSync(path.join(source, "node_modules"), { recursive: true });
-  writeFileSync(path.join(source, "node_modules", "ignored.js"), "ignored", "utf8");
+  mkdirSync(path.join(source, "packages", "web", "node_modules"), { recursive: true });
+  writeFileSync(path.join(source, "packages", "web", "node_modules", "ignored.js"), "ignored", "utf8");
   writeFileSync(path.join(outside, "secret.txt"), "secret", "utf8");
   symlinkSync(path.join(outside, "secret.txt"), path.join(source, "secret-link"));
 
@@ -45,7 +45,19 @@ test("skips symlinks and heavy generated directories", () => {
     { path: ".nodes/tycho-experiment.json", content: "{}\n" },
   ], { tempRoot });
 
-  assert.equal(existsSync(path.join(workspace.cwd, "node_modules")), false);
+  assert.equal(existsSync(path.join(workspace.cwd, "packages", "web", "node_modules")), false);
   assert.equal(existsSync(path.join(workspace.cwd, "secret-link")), false);
   cleanupEvolutionWorkspace(workspace.cwd);
+});
+
+test("rejects a temporary root nested inside the configured source workspace", () => {
+  const source = tempDir("nodes-evolution-source-");
+  const tempRoot = path.join(source, ".nodes", "evolution-runs");
+
+  assert.throws(
+    () => createEvolutionWorkspace(source, "run-3", [
+      { path: ".nodes/tycho-experiment.json", content: "{}\n" },
+    ], { tempRoot }),
+    /must be outside the configured source workspace/,
+  );
 });
