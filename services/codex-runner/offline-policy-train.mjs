@@ -1,4 +1,5 @@
 import { createPolicyController } from "./policy-controller.mjs";
+import { createTeamPolicyController } from "./team-policy-controller.mjs";
 import { createTrajectoryStore } from "./trajectory-store.mjs";
 
 const reset = process.argv.includes("--reset");
@@ -7,8 +8,12 @@ const workspaceId = workspaceArg ? workspaceArg.slice("--workspace=".length).tri
 
 const store = createTrajectoryStore();
 const policy = createPolicyController({ mode: "online" });
+const teamPolicy = createTeamPolicyController({ mode: "online" });
 const trajectories = await store.list(workspaceId ? { workspaceId } : {});
-const result = await policy.trainOffline(trajectories, { reset });
+const [strategy, team] = await Promise.all([
+  policy.trainOffline(trajectories, { reset }),
+  teamPolicy.trainOffline(trajectories, { reset }),
+]);
 const stats = await store.stats(workspaceId ? { workspaceId } : {});
 
 console.log(JSON.stringify({
@@ -16,6 +21,7 @@ console.log(JSON.stringify({
   reset,
   workspaceId,
   trajectories: trajectories.length,
-  ...result,
+  strategy,
+  team,
   replay: stats,
 }, null, 2));
