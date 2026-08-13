@@ -36,7 +36,15 @@ const completedMessageText = (event: CodexCanvasEvent) => {
   return typeof params.text === "string" && params.text.trim() ? params.text.trim() : null;
 };
 
+const forbiddenSideEffectEvents = new Set<CodexCanvasEvent["type"]>([
+  "agent.child.spawned",
+  "tool.started",
+  "shell.started",
+  "file.changed",
+]);
+
 export class CodexGeneratorApprovalRequiredError extends Error {}
+export class CodexGeneratorSideEffectError extends Error {}
 export class CodexGeneratorTimeoutError extends Error {}
 
 export async function consumeCodexGeneratorStream(input: {
@@ -93,6 +101,11 @@ export async function consumeCodexGeneratorStream(input: {
     if (event.type === "approval.requested") {
       throw new CodexGeneratorApprovalRequiredError(
         "Codex variant generator requested an approval; hypothesis generation must be side-effect free.",
+      );
+    }
+    if (forbiddenSideEffectEvents.has(event.type)) {
+      throw new CodexGeneratorSideEffectError(
+        `Codex variant generator attempted forbidden execution activity: ${event.type}.`,
       );
     }
     if (event.type === "run.failed") throw new Error("Codex variant generation run failed.");
