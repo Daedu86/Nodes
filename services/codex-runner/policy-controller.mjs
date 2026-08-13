@@ -81,6 +81,7 @@ function freshPolicy() {
     version: 0,
     q: {},
     visits: {},
+    appliedTransitions: {},
     updatedAt: null,
   };
 }
@@ -92,6 +93,7 @@ function normalizePolicy(value) {
     version: Number.isInteger(value.version) && value.version >= 0 ? value.version : 0,
     q: isRecord(value.q) ? value.q : {},
     visits: isRecord(value.visits) ? value.visits : {},
+    appliedTransitions: isRecord(value.appliedTransitions) ? value.appliedTransitions : {},
     updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : null,
   };
 }
@@ -185,9 +187,14 @@ export function createPolicyController(options = {}) {
 
   async function update(input) {
     await load();
+    const transitionId = typeof input.transitionId === "string" && input.transitionId.trim() ? input.transitionId.trim() : null;
+    if (transitionId && policy.appliedTransitions[transitionId]) {
+      return { updated: false, duplicate: true, policyVersion: `q${policy.version}` };
+    }
     if (mode !== "online") return { updated: false, policyVersion: `q${policy.version}` };
     const nextStateKey = policyStateKey(input.nextState);
     const qValue = applyUpdate({ ...input, nextStateKey });
+    if (transitionId) policy.appliedTransitions[transitionId] = new Date().toISOString();
     await persist();
     return { updated: true, qValue, nextStateKey, policyVersion: `q${policy.version}` };
   }
@@ -199,12 +206,15 @@ export function createPolicyController(options = {}) {
     let updates = 0;
     for (const trajectory of ordered) {
       if (!trajectory?.stateKey || !trajectory?.actionId || !Number.isFinite(trajectory.reward) || !isRecord(trajectory.nextState)) continue;
+      const transitionId = `offline:${trajectory.trajectoryId}`;
+      if (policy.appliedTransitions[transitionId]) continue;
       applyUpdate({
         stateKey: trajectory.stateKey,
         actionId: trajectory.actionId,
         reward: trajectory.reward,
         nextStateKey: policyStateKey(trajectory.nextState),
       });
+      policy.appliedTransitions[transitionId] = new Date().toISOString();
       updates += 1;
     }
     await persist();
@@ -221,6 +231,7 @@ export function createPolicyController(options = {}) {
       epsilon,
       policyVersion: `q${policy.version}`,
       stateCount: Object.keys(policy.q).length,
+      appliedTransitionCount: Object.keys(policy.appliedTransitions).length,
       updatedAt: policy.updatedAt,
       actions: POLICY_ACTIONS.map((action) => action.id),
     };
