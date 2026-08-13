@@ -6,6 +6,7 @@ import type {
 import type { ProjectMap } from "@/lib/project-map";
 
 export type ProjectActor = {
+  claimLegacyOwnership?: boolean;
   userEmail: string | null;
   userId: string;
 };

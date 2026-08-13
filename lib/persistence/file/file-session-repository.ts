@@ -202,9 +202,16 @@ async function claimSessionOwnerIfNeeded(session: StoredSession, ownerId: string
   return claimed;
 }
 
-async function getStoredSession(sessionId: string, ownerId?: string) {
+async function getStoredSession(
+  sessionId: string,
+  ownerId?: string,
+  claimLegacyOwnership = true,
+) {
   const session = await readSessionDocumentFromPath(getSessionFilePath(sessionId));
   if (!ownerId) {
+    return session;
+  }
+  if (!session.ownerId && !claimLegacyOwnership) {
     return session;
   }
   const claimed = await claimSessionOwnerIfNeeded(session, ownerId);
@@ -257,8 +264,12 @@ export const fileSessionRepository: SessionRepository = {
     return sortSessions(summaries);
   },
 
-  async getSession(sessionId, ownerId) {
-    return toSessionDocument(await getStoredSession(sessionId, ownerId));
+  async getSession(sessionId, ownerId, options) {
+    return toSessionDocument(await getStoredSession(
+      sessionId,
+      ownerId,
+      options?.claimLegacyOwnership !== false,
+    ));
   },
 
   async createSession(input: SessionCreateInput = {}) {
