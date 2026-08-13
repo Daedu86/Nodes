@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import { createRunnerCodexVariantGenerator } from "./codex-evolution-generator.mjs";
 import { createDurableEvolutionOrchestrator } from "./evolution-orchestrator.mjs";
 import { buildLearningRewardFromEvaluation } from "./learning-reward.mjs";
+import { createMultiAgentVariantGenerator } from "./multi-agent-variant-generator.mjs";
 import { createPolicyController, derivePolicyState } from "./policy-controller.mjs";
+import { createTeamPolicyController } from "./team-policy-controller.mjs";
 import { createTrajectoryStore, stableSpecHash } from "./trajectory-store.mjs";
 
 const isRecord = (value) => value && typeof value === "object" && !Array.isArray(value);
@@ -32,6 +34,10 @@ function policyMetaFromAttempt(attempt) {
   return isRecord(attempt?.metadata?.learningPolicy) ? attempt.metadata.learningPolicy : null;
 }
 
+function teamMetaFromAttempt(attempt) {
+  return isRecord(attempt?.metadata?.multiAgentTeam) ? attempt.metadata.multiAgentTeam : null;
+}
+
 function replayGuidance(trajectories) {
   return trajectories.map((item) => ({
     actionId: item.actionId,
@@ -40,16 +46,23 @@ function replayGuidance(trajectories) {
     isWinner: item.isWinner,
     hypothesis: typeof item.candidateMetadata?.hypothesis === "string" ? item.candidateMetadata.hypothesis : null,
     rationale: typeof item.candidateMetadata?.rationale === "string" ? item.candidateMetadata.rationale : null,
+    teamTopology: item.candidateMetadata?.multiAgentTeam?.topologyId ?? null,
   }));
 }
 
 export function createLearningEvolutionOrchestrator(options = {}) {
   const policy = options.policyController || createPolicyController(options.learning || {});
+  const teamPolicy = options.teamPolicyController || createTeamPolicyController(options.learning || {});
   const replay = options.trajectoryStore || createTrajectoryStore(options.learning || {});
-  const baseGenerator = options.generateVariants || createRunnerCodexVariantGenerator({
+  const codexGenerator = options.generateVariants || createRunnerCodexVariantGenerator({
     host: options.host || "127.0.0.1",
     codexPort: Number(options.codexPort || process.env.CODEX_RUNNER_PORT || 8787),
     token: options.token ?? process.env.CODEX_RUNNER_TOKEN?.trim() ?? null,
+  });
+  const multiAgent = options.multiAgentGenerator || createMultiAgentVariantGenerator({
+    baseGenerator: codexGenerator,
+    teamPolicyController: teamPolicy,
+    learning: options.learning || {},
   });
   const knownRuns = new Map();
 
@@ -67,8 +80,28 @@ export function createLearningEvolutionOrchestrator(options = {}) {
     });
   }
 
+  async function generateTeamVariants(input, selected, parentEvaluation) {
+    if (teamPolicy.mode === "off") return codexGenerator({ ...input, parentEvaluation });
+    return multiAgent.generate({
+      ...input,
+      parentEvaluation,
+      stateKey: selected.stateKey,
+      strategyActionId: selected.action.id,
+      seedKey: `${input.sessionId}|${input.workspaceId}|${input.generation}|${input.parent?.key || "seed"}|${selected.action.id}`,
+    });
+  }
+
   async function learningGenerator(input) {
-    if (policy.mode === "off") return baseGenerator(input);
+    if (policy.mode === "off") {
+      if (teamPolicy.mode === "off") return codexGenerator(input);
+      const state = derivePolicyState(input.parentEvaluation);
+      return multiAgent.generate({
+        ...input,
+        stateKey: `strategy-off|decision=${state.decision}|pass=${state.passBand}|blocked=${state.blockedBand}|speed=${state.speedBand}`,
+        strategyActionId: "exploit",
+        seedKey: `${input.sessionId}|${input.workspaceId}|${input.generation}|${input.parent?.key || "seed"}|strategy-off`,
+      });
+    }
     const state = derivePolicyState(input.parentEvaluation);
     await updatePreviousWinner(input, state);
     const selected = await policy.select({
@@ -94,7 +127,7 @@ export function createLearningEvolutionOrchestrator(options = {}) {
         policyVersion: selected.policyVersion,
         replay: replayGuidance(examples),
       } } };
-    const generated = await baseGenerator({ ...input, parentEvaluation });
+    const generated = await generateTeamVariants(input, selected, parentEvaluation);
     return {
       ...generated,
       variants: generated.variants.map((variant) => ({
@@ -171,10 +204,22 @@ export function createLearningEvolutionOrchestrator(options = {}) {
         });
       }
     }
+    if (teamPolicy.mode === "online" && winner) {
+      const team = teamMetaFromAttempt(winner);
+      if (team?.decisionId && team?.contextKey && team?.topologyId) {
+        const reward = winner.status === "succeeded" ? buildLearningRewardFromEvaluation(evaluationFromAttempt(winner)).reward : 0;
+        await teamPolicy.update({
+          outcomeId: `team:${team.decisionId}`,
+          contextKey: team.contextKey,
+          topologyId: team.topologyId,
+          reward,
+        });
+      }
+    }
   }
 
   async function captureSnapshot(snapshot) {
-    if (!snapshot || policy.mode === "off") return snapshot;
+    if (!snapshot || (policy.mode === "off" && teamPolicy.mode === "off")) return snapshot;
     for (const generation of Array.isArray(snapshot.generations) ? snapshot.generations : []) {
       if (generation?.status === "completed") await captureGeneration(snapshot, generation);
     }
@@ -212,14 +257,21 @@ export function createLearningEvolutionOrchestrator(options = {}) {
   }
 
   async function learningStatus() {
-    const [policyStatus, replayStats] = await Promise.all([policy.status(), replay.stats()]);
-    return { policy: policyStatus, replay: replayStats };
+    const [policyStatus, replayStats, teamStatus] = await Promise.all([policy.status(), replay.stats(), teamPolicy.status()]);
+    return { policy: policyStatus, replay: replayStats, team: teamStatus };
   }
 
   async function trainOffline(input = {}) {
     const trajectories = await replay.list(input.workspaceId ? { workspaceId: input.workspaceId } : {});
-    const result = await policy.trainOffline(trajectories, { reset: input.reset === true });
-    return { ...result, replay: await replay.stats(input.workspaceId ? { workspaceId: input.workspaceId } : {}) };
+    const [strategy, team] = await Promise.all([
+      policy.trainOffline(trajectories, { reset: input.reset === true }),
+      teamPolicy.trainOffline(trajectories, { reset: input.reset === true }),
+    ]);
+    return {
+      ...strategy,
+      team,
+      replay: await replay.stats(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+    };
   }
 
   return {
