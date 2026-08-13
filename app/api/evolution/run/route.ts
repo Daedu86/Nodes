@@ -135,6 +135,20 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
+    if (
+      mode === "continue" &&
+      existingSnapshot?.projectId &&
+      projectId &&
+      existingSnapshot.projectId !== projectId
+    ) {
+      return Response.json(
+        {
+          error: "Evolution continuation cannot change the persisted projectId.",
+          code: "evolution_project_mismatch",
+        },
+        { status: 409 },
+      );
+    }
 
     let seed;
     if (mode === "continue") {
