@@ -14,6 +14,16 @@ function parentDomain(input) {
     || "general-evolution";
 }
 
+function curriculumOptions(learning = {}) {
+  return {
+    mode: learning.curriculumMode,
+    maxTasksPerRun: learning.curriculumMaxTasksPerRun,
+    maxDifficulty: learning.curriculumMaxDifficulty,
+    targetReward: learning.curriculumTargetReward,
+    allowedDomains: learning.curriculumAllowedDomains,
+  };
+}
+
 function withCurriculumEvidence(parentEvaluation, plan) {
   const base = isRecord(parentEvaluation) ? parentEvaluation : { score: 0, metrics: {}, evidence: {} };
   return {
@@ -48,7 +58,7 @@ function stampCurriculum(generated, plan) {
 export function createCurriculumEvolutionOrchestrator(options = {}) {
   const replay = options.trajectoryStore || createTrajectoryStore(options.learning || {});
   const skillRegistry = options.skillRegistry || createSkillRegistry(options.learning || {});
-  const curriculum = options.curriculumController || createCurriculumController(options.learning || {});
+  const curriculum = options.curriculumController || createCurriculumController(curriculumOptions(options.learning || {}));
   const baseGenerator = options.generateVariants || createRunnerCodexVariantGenerator({
     host: options.host || "127.0.0.1",
     codexPort: Number(options.codexPort || process.env.CODEX_RUNNER_PORT || 8787),
