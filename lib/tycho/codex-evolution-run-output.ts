@@ -39,7 +39,9 @@ const completedMessageText = (event: CodexCanvasEvent) => {
 const forbiddenSideEffectEvents = new Set<CodexCanvasEvent["type"]>([
   "agent.child.spawned",
   "tool.started",
+  "tool.completed",
   "shell.started",
+  "shell.completed",
   "file.changed",
 ]);
 
