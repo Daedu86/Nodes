@@ -4,18 +4,19 @@ import { existsSync, lstatSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 
+import { readEvolutionRunnerConfig } from "./evolution-config.mjs";
 import { readTychoReadiness } from "./tycho-readiness.mjs";
 import { normalizeWorkspaceFiles } from "./workspace-artifacts.mjs";
 import { createEvolutionWorkspace, cleanupEvolutionWorkspace } from "./evolution-workspace.mjs";
 import { readTychoEvolutionResult } from "./evolution-result.mjs";
 
-const BASE_PORT = Number(process.env.CODEX_RUNNER_PORT || 8787);
-const PORT = Number(process.env.TYCHO_EVOLUTION_RUNNER_PORT || BASE_PORT + 1);
+const RUNNER_CONFIG = readEvolutionRunnerConfig();
+const PORT = RUNNER_CONFIG.port;
 const HOST = process.env.CODEX_RUNNER_HOST || "127.0.0.1";
 const RUNNER_TOKEN = process.env.CODEX_RUNNER_TOKEN?.trim() || null;
 const TYCHO_BIN = process.env.TYCHO_EXPERIMENT_BIN?.trim() || "tycho-experiment";
-const MAX_CONCURRENCY = Number(process.env.TYCHO_EVOLUTION_MAX_CONCURRENCY || 4);
-const HARD_TIMEOUT_MS = Number(process.env.TYCHO_EVOLUTION_HARD_TIMEOUT_MS || 1_200_000);
+const MAX_CONCURRENCY = RUNNER_CONFIG.maxConcurrency;
+const HARD_TIMEOUT_MS = RUNNER_CONFIG.hardTimeoutMs;
 const MAX_CAPTURE_CHARS = 20_000;
 
 const runs = new Map();
@@ -80,7 +81,6 @@ function appendCapture(current, chunk) {
 function publicRun(run) {
   return {
     runId: run.runId,
-    ownerId: run.ownerId,
     workspaceId: run.workspaceId,
     projectId: run.projectId,
     sessionId: run.sessionId,
@@ -108,6 +108,13 @@ function validateProtocol(workspaceFiles, experimentId) {
     throw new Error("Evolution protocol experimentId does not match the requested experiment.");
   }
   return files;
+}
+
+function releaseRunWorkspace(run) {
+  active.delete(run.runId);
+  cleanupEvolutionWorkspace(run.cwd);
+  run.cwd = null;
+  run.child = null;
 }
 
 function startEvolutionRun(body, ownerId) {
@@ -172,17 +179,22 @@ function startEvolutionRun(body, ownerId) {
   const hardTimeout = setTimeout(() => child.kill("SIGKILL"), HARD_TIMEOUT_MS);
   child.on("error", (error) => {
     clearTimeout(hardTimeout);
+    if (!run.cwd) return;
     run.status = "failed";
     run.error = error.message;
     run.finishedAt = new Date().toISOString();
-    active.delete(runId);
-    cleanupEvolutionWorkspace(run.cwd);
-    run.cwd = null;
+    releaseRunWorkspace(run);
   });
   child.on("exit", (code, signal) => {
     clearTimeout(hardTimeout);
-    if (run.status === "cancelled") return;
+    if (!run.cwd) return;
     run.exitCode = code;
+
+    if (run.status === "cancelled") {
+      releaseRunWorkspace(run);
+      return;
+    }
+
     try {
       if (![0, 3, 4].includes(code)) {
         throw new Error(`tycho-experiment failed with exit ${code ?? "none"}${signal ? ` (${signal})` : ""}: ${run.stderr.trim() || "no stderr"}`);
@@ -194,10 +206,7 @@ function startEvolutionRun(body, ownerId) {
       run.error = error instanceof Error ? error.message : String(error);
     }
     run.finishedAt = new Date().toISOString();
-    active.delete(runId);
-    cleanupEvolutionWorkspace(run.cwd);
-    run.cwd = null;
-    run.child = null;
+    releaseRunWorkspace(run);
   });
 
   return run;
@@ -242,10 +251,6 @@ const server = http.createServer(async (req, res) => {
         run.error = "Evolution run cancelled.";
         run.finishedAt = new Date().toISOString();
         run.child?.kill("SIGTERM");
-        active.delete(run.runId);
-        cleanupEvolutionWorkspace(run.cwd);
-        run.cwd = null;
-        run.child = null;
       }
       return json(res, 200, publicRun(run));
     }
