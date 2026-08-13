@@ -4,8 +4,8 @@ import { existsSync, lstatSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 
+import { createCurriculumEvolutionOrchestrator } from "./curriculum-evolution-orchestrator.mjs";
 import { readEvolutionRunnerConfig } from "./evolution-config.mjs";
-import { createLearningEvolutionOrchestrator } from "./learning-evolution-orchestrator.mjs";
 import { readTychoReadiness } from "./tycho-readiness.mjs";
 import { normalizeWorkspaceFiles } from "./workspace-artifacts.mjs";
 import { createEvolutionWorkspace, cleanupEvolutionWorkspace } from "./evolution-workspace.mjs";
@@ -22,7 +22,7 @@ const MAX_CAPTURE_CHARS = 20_000;
 
 const runs = new Map();
 const active = new Set();
-const durable = createLearningEvolutionOrchestrator({
+const durable = createCurriculumEvolutionOrchestrator({
   host: "127.0.0.1",
   evolutionPort: PORT,
   token: RUNNER_TOKEN,
@@ -246,6 +246,20 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/v1/evolution/learning/status" && req.method === "GET") {
       return json(res, 200, await durable.learningStatus());
+    }
+
+    if (url.pathname === "/v1/evolution/curriculum/status" && req.method === "GET") {
+      const workspaceId = asString(url.searchParams.get("workspaceId"));
+      return json(res, 200, await durable.curriculumReport(workspaceId));
+    }
+
+    if (url.pathname === "/v1/evolution/curriculum/plan" && req.method === "POST") {
+      const body = await readJson(req);
+      return json(res, 200, await durable.curriculumPlan({
+        workspaceId: asString(body.workspaceId),
+        generation: Number(body.generation) || 1,
+        defaultDomain: asString(body.domain) || "general-evolution",
+      }));
     }
 
     if (url.pathname === "/v1/evolution/learning/replay" && req.method === "GET") {
