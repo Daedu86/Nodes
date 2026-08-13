@@ -36,6 +36,7 @@ const bindLocalImport = (input, fileName) => {
 
 patched = bindLocalImport(patched, "tycho-readiness.mjs");
 patched = bindLocalImport(patched, "workspace-artifacts.mjs");
+patched = bindLocalImport(patched, "execution-profile.mjs");
 
 const runtimePath = path.join(os.tmpdir(), `nodes-codex-runner-${process.pid}.mjs`);
 await writeFile(runtimePath, patched, "utf8");
