@@ -165,5 +165,14 @@ export const tychoPromotionEvaluator: EvolutionEvaluator<
   TychoEvolutionExecution,
   TychoEvolutionContext
 > = {
-  evaluate: async ({ execution }) => evaluateTychoPromotionResult(execution.result),
+  evaluate: async ({ candidate, execution }) => {
+    const evaluation = evaluateTychoPromotionResult(execution.result);
+    return {
+      ...evaluation,
+      evidence: {
+        ...(evaluation.evidence ?? {}),
+        candidateMetadata: candidate.metadata ?? {},
+      },
+    };
+  },
 };
