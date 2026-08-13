@@ -47,8 +47,8 @@ const TYCHO_EXPERIMENT_INSTRUCTIONS = `Execution policy: Tycho empirical harness
 
 Before treating a candidate as successful, use Tycho's generic experiment harness as the deterministic promotion gate:
 1. State one falsifiable hypothesis, the expected observation, explicit falsifiers, the experiment budget, and the promotion checks before seeing the result.
-2. Put experiment code in a Python file inside the repository (normally under .nodes/). Do not ask Tycho to run shell command strings or arbitrary host executables. The generic harness executes declared Python scripts only through Tycho's network-disabled Docker/Finch sandbox.
-3. Write the protocol to .nodes/tycho-experiment.json. Keep every script path and evidence path relative to the repository. Do not place secrets in the protocol or artifacts.
+2. Put experiment code in a Python file inside the authorized workload artifact area (normally under .nodes/). Do not ask Tycho to run shell command strings or arbitrary host executables. The generic harness executes declared Python scripts only through Tycho's network-disabled Docker/Finch sandbox.
+3. Write the protocol to .nodes/tycho-experiment.json. Keep every script path and evidence path relative to the configured workload workspace. Do not place secrets in the protocol or artifacts.
 4. Execute exactly:
    tycho-experiment --workspace . --protocol .nodes/tycho-experiment.json --result .nodes/tycho-result.json
 5. Read .nodes/tycho-result.json. A candidate may be promoted only when decision == "promote". "reject" means the hypothesis was falsified under its predeclared gate. "blocked" means execution/infrastructure evidence is incomplete.
@@ -84,7 +84,8 @@ export const buildProjectExecutionPrompt = ({
     upstreamSummary ? `Selected upstream outputs:\n${upstreamSummary}` : "",
     artifactContext ? `Primary-session artifacts / runbooks:\n${artifactContext}` : "",
     mode === "tycho" ? TYCHO_EXPERIMENT_INSTRUCTIONS : "Execution policy: direct Luna/Codex workload execution.",
-    "Treat the primary-session artifacts/runbooks as authoritative execution instructions for this workload. Use the repository/workspace as the source of truth. Preserve useful outputs as files/artifacts and report what was executed, verified, and what remains blocked. Do not expose local credentials or authentication files.",
+    "Scope rule: the selected workload session artifacts and explicitly selected upstream outputs are authoritative. Ambient repository files, unrelated .nodes evidence, other project runners, git history, and neighboring experiments are out of scope unless the server-authoritative workload manifest explicitly lists them. Do not recursively scan the repository to discover extra context. If required evidence is not in the authorized workload context, report the workload as blocked instead of borrowing context from another project or experiment.",
+    "Preserve useful outputs as workload files/artifacts and report what was executed, verified, and what remains blocked. Do not expose local credentials or authentication files.",
   ]
     .filter(Boolean)
     .join("\n\n");

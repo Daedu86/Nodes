@@ -142,10 +142,15 @@ export function ProjectExecutionRunnerPanel({
     () => managedRuns.agentNodes.filter((node) => (node.data as ManagedAgentData).kind === "agent-run"),
     [managedRuns.agentNodes],
   );
-  const managedNode = React.useMemo(
-    () => agentRunNodes.find((node) => node.id === managedLocalId) ?? null,
-    [agentRunNodes, managedLocalId],
-  );
+  const managedNode = React.useMemo(() => {
+    const selected = agentRunNodes.find((node) => node.id === managedLocalId);
+    if (selected) return selected;
+    const active = [...agentRunNodes].reverse().find((node) => {
+      const agentStatus = (node.data as ManagedAgentData).agentStatus;
+      return Boolean(agentStatus && !["completed", "failed", "cancelled"].includes(agentStatus));
+    });
+    return active ?? agentRunNodes.at(-1) ?? null;
+  }, [agentRunNodes, managedLocalId]);
   const managedData = (managedNode?.data as ManagedAgentData | undefined) ?? null;
   const runBusy = Boolean(
     preparing ||

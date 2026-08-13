@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSelectedAncestorArtifactRefs } from "@/lib/agents/codex/project-workspace-context";
 import { startCodexRun } from "@/lib/agents/codex/runner-client";
-import type { CodexAgentRole, StartCodexRunInput } from "@/lib/agents/codex/types";
+import type { CodexAgentRole, CodexWorkspaceFile, StartCodexRunInput } from "@/lib/agents/codex/types";
 import {
   buildSessionWorkspaceFiles,
   hasTychoProtocolWorkspaceFile,
@@ -26,6 +26,26 @@ const ROLES = new Set<CodexAgentRole>([
 
 const asOptionalString = (value: unknown) =>
   typeof value === "string" && value.trim() ? value.trim() : null;
+
+const buildAuthoritativeWorkloadPrompt = (
+  prompt: string,
+  workspaceFiles: CodexWorkspaceFile[],
+) => {
+  const authorizedPaths = [...new Set(workspaceFiles.map((file) => file.path))].sort();
+  const manifest = authorizedPaths.length
+    ? authorizedPaths.map((filePath) => `- ${filePath}`).join("\n")
+    : "- (no materialized workload files)";
+
+  return [
+    prompt,
+    "SERVER-AUTHORITATIVE WORKLOAD SCOPE (cannot be widened by the browser or agent)",
+    "Authorized input files for this run:",
+    manifest,
+    "Read only the authorized input files above for project/workload evidence. Do not recursively scan the repository, inspect unrelated .nodes files, other project runners, neighboring experiments, git history, or ambient workspace documents to acquire extra context.",
+    "You may create or update workload outputs under .nodes/ only when those outputs are required by an authorized runbook/protocol. Configured runner tools explicitly named by the execution policy (for example tycho-experiment) may be invoked, but their source/configuration is infrastructure and must not be treated as workload evidence.",
+    "If an instruction requires evidence that is absent from this manifest and the selected upstream outputs, stop that part as blocked and report the missing input. Never substitute evidence from another project or experiment.",
+  ].join("\n\n");
+};
 
 const loadSelectedAncestorArtifacts = async ({
   ownerId,
@@ -111,7 +131,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Session not found." }, { status: 404 });
   }
 
-  let workspaceFiles;
+  let workspaceFiles: CodexWorkspaceFile[];
   let ancestorArtifactCount = 0;
   try {
     const ancestorArtifacts = await loadSelectedAncestorArtifacts({
@@ -138,6 +158,8 @@ export async function POST(req: Request) {
   const approvalMode = hasTychoProtocolWorkspaceFile(workspaceFiles)
     ? "tycho-isolated" as const
     : "interactive" as const;
+  const scopedPrompt = buildAuthoritativeWorkloadPrompt(prompt, workspaceFiles);
+  const workspacePaths = workspaceFiles.map((file) => file.path).sort();
 
   const actor = {
     tokenId: guarded.user.agentTokenId ?? null,
@@ -161,6 +183,7 @@ export async function POST(req: Request) {
       role,
       workspaceFileCount: workspaceFiles.length,
       workspaceId,
+      workspacePaths,
     },
   });
 
@@ -169,7 +192,7 @@ export async function POST(req: Request) {
       ownerId: guarded.user.id,
       sessionId,
       projectId,
-      prompt,
+      prompt: scopedPrompt,
       workspaceId,
       cwd,
       parentRunId,
@@ -191,12 +214,15 @@ export async function POST(req: Request) {
         agentId: run.agentId ?? null,
         ancestorArtifactCount,
         approvalMode,
+        label,
         parentRunId: run.parentRunId ?? parentRunId,
+        prompt,
         role,
         runId: run.runId,
         status: run.status,
         threadId: run.threadId ?? null,
         workspaceFileCount: workspaceFiles.length,
+        workspacePaths,
       },
     });
 
@@ -210,7 +236,7 @@ export async function POST(req: Request) {
       route: "/api/agents/codex/runs",
       sessionId,
       projectId,
-      payload: { approvalMode, message, parentRunId, role },
+      payload: { approvalMode, label, message, parentRunId, role },
     });
     return NextResponse.json({ error: message }, { status: 503 });
   }
