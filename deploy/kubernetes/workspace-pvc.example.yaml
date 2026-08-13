@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nodes-workspace
+  namespace: nodes-evolution
+  labels:
+    app.kubernetes.io/part-of: nodes-ai-canvas
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+# Set storageClassName when your cluster has no default StorageClass.
