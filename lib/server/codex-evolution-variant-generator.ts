@@ -88,7 +88,7 @@ export function createCodexEvolutionVariantGenerator(
         }),
         role: "researcher",
         label,
-        approvalMode: "interactive",
+        approvalMode: "hypothesis-only",
         workspaceFiles: [],
         metadata: {
           purpose: "tycho-evolution-variant-generation",
