@@ -7,6 +7,10 @@ import { createMultiAgentVariantGenerator } from "./multi-agent-variant-generato
 import { createPolicyController, derivePolicyState } from "./policy-controller.mjs";
 import { createTeamPolicyController } from "./team-policy-controller.mjs";
 import { createTrajectoryStore, stableSpecHash } from "./trajectory-store.mjs";
+import { createSkillRegistry } from "./skill-registry.mjs";
+import { createSkillRetriever } from "./skill-retriever.mjs";
+import { mineAndRegisterSkills } from "./skill-miner.mjs";
+import { validateRegisteredSkills } from "./skill-validator.mjs";
 
 const isRecord = (value) => value && typeof value === "object" && !Array.isArray(value);
 
@@ -47,13 +51,30 @@ function replayGuidance(trajectories) {
     hypothesis: typeof item.candidateMetadata?.hypothesis === "string" ? item.candidateMetadata.hypothesis : null,
     rationale: typeof item.candidateMetadata?.rationale === "string" ? item.candidateMetadata.rationale : null,
     teamTopology: item.candidateMetadata?.multiAgentTeam?.topologyId ?? null,
+    skillRefs: Array.isArray(item.candidateMetadata?.skillContext?.skillRefs) ? item.candidateMetadata.skillContext.skillRefs : [],
   }));
+}
+
+function withEvidence(parentEvaluation, additions) {
+  const base = isRecord(parentEvaluation) ? parentEvaluation : { score: 0, metrics: {}, evidence: {} };
+  return {
+    ...base,
+    metrics: isRecord(base.metrics) ? base.metrics : {},
+    evidence: { ...(isRecord(base.evidence) ? base.evidence : {}), ...additions },
+  };
 }
 
 export function createLearningEvolutionOrchestrator(options = {}) {
   const policy = options.policyController || createPolicyController(options.learning || {});
   const teamPolicy = options.teamPolicyController || createTeamPolicyController(options.learning || {});
   const replay = options.trajectoryStore || createTrajectoryStore(options.learning || {});
+  const skillRegistry = options.skillRegistry || createSkillRegistry(options.learning || {});
+  const skillRetriever = options.skillRetriever || createSkillRetriever({
+    skillRegistry,
+    mode: options.learning?.skillMode,
+    topK: options.learning?.skillTopK,
+    exploration: options.learning?.skillExploration,
+  });
   const codexGenerator = options.generateVariants || createRunnerCodexVariantGenerator({
     host: options.host || "127.0.0.1",
     codexPort: Number(options.codexPort || process.env.CODEX_RUNNER_PORT || 8787),
@@ -80,6 +101,32 @@ export function createLearningEvolutionOrchestrator(options = {}) {
     });
   }
 
+  async function skillContextFor(input, state, strategyActionId) {
+    return skillRetriever.retrieve({
+      state,
+      strategyActionId,
+      seedKey: `${input.sessionId}|${input.workspaceId}|${input.generation}|${input.parent?.key || "seed"}|${strategyActionId}`,
+    });
+  }
+
+  function stampSkillContext(generated, skillContext) {
+    if (!skillContext?.skillRefs?.length) return generated;
+    return {
+      ...generated,
+      variants: generated.variants.map((variant) => ({
+        ...variant,
+        metadata: {
+          ...(isRecord(variant.metadata) ? variant.metadata : {}),
+          skillContext: {
+            mode: skillContext.mode,
+            skillRefs: skillContext.skillRefs,
+            skills: skillContext.skills.map((skill) => ({ ref: skill.ref, title: skill.title, status: skill.status, experimental: skill.experimental })),
+          },
+        },
+      })),
+    };
+  }
+
   async function generateTeamVariants(input, selected, parentEvaluation) {
     if (teamPolicy.mode === "off") return codexGenerator({ ...input, parentEvaluation });
     return multiAgent.generate({
@@ -92,17 +139,25 @@ export function createLearningEvolutionOrchestrator(options = {}) {
   }
 
   async function learningGenerator(input) {
+    const state = derivePolicyState(input.parentEvaluation);
     if (policy.mode === "off") {
-      if (teamPolicy.mode === "off") return codexGenerator(input);
-      const state = derivePolicyState(input.parentEvaluation);
-      return multiAgent.generate({
+      const strategyActionId = "exploit";
+      const skills = await skillContextFor(input, state, strategyActionId);
+      const parentEvaluation = withEvidence(input.parentEvaluation, {
+        skillContext: skills.skills,
+      });
+      let generated;
+      if (teamPolicy.mode === "off") generated = await codexGenerator({ ...input, parentEvaluation });
+      else generated = await multiAgent.generate({
         ...input,
+        parentEvaluation,
         stateKey: `strategy-off|decision=${state.decision}|pass=${state.passBand}|blocked=${state.blockedBand}|speed=${state.speedBand}`,
-        strategyActionId: "exploit",
+        strategyActionId,
         seedKey: `${input.sessionId}|${input.workspaceId}|${input.generation}|${input.parent?.key || "seed"}|strategy-off`,
       });
+      return stampSkillContext(generated, skills);
     }
-    const state = derivePolicyState(input.parentEvaluation);
+
     await updatePreviousWinner(input, state);
     const selected = await policy.select({
       state,
@@ -110,24 +165,19 @@ export function createLearningEvolutionOrchestrator(options = {}) {
     });
     const decisionId = digest(`${input.sessionId}|${input.workspaceId}|${input.generation}|${selected.stateKey}|${selected.action.id}|${selected.policyVersion}`);
     const examples = await replay.top({ workspaceId: input.workspaceId, stateKey: selected.stateKey }, 3);
-    const parentEvaluation = isRecord(input.parentEvaluation)
-      ? { ...input.parentEvaluation, evidence: { ...(isRecord(input.parentEvaluation.evidence) ? input.parentEvaluation.evidence : {}), learningPolicy: {
+    const skills = await skillContextFor(input, state, selected.action.id);
+    const parentEvaluation = withEvidence(input.parentEvaluation, {
+      learningPolicy: {
         decisionId,
         actionId: selected.action.id,
         directive: selected.action.directive,
         stateKey: selected.stateKey,
         policyVersion: selected.policyVersion,
         replay: replayGuidance(examples),
-      } } }
-      : { score: 0, metrics: {}, evidence: { learningPolicy: {
-        decisionId,
-        actionId: selected.action.id,
-        directive: selected.action.directive,
-        stateKey: selected.stateKey,
-        policyVersion: selected.policyVersion,
-        replay: replayGuidance(examples),
-      } } };
-    const generated = await generateTeamVariants(input, selected, parentEvaluation);
+      },
+      skillContext: skills.skills,
+    });
+    const generated = stampSkillContext(await generateTeamVariants(input, selected, parentEvaluation), skills);
     return {
       ...generated,
       variants: generated.variants.map((variant) => ({
@@ -151,6 +201,13 @@ export function createLearningEvolutionOrchestrator(options = {}) {
   }
 
   const durable = createDurableEvolutionOrchestrator({ ...options, generateVariants: learningGenerator });
+
+  async function refreshSkills(workspaceId = null) {
+    if (skillRetriever.mode === "off") return { mined: 0, registered: [], validation: [] };
+    const mined = await mineAndRegisterSkills({ trajectoryStore: replay, skillRegistry, workspaceId });
+    const validation = await validateRegisteredSkills({ trajectoryStore: replay, skillRegistry, workspaceId });
+    return { ...mined, validation };
+  }
 
   async function captureGeneration(snapshot, generation) {
     const attempts = Array.isArray(generation.attempts) ? generation.attempts : [];
@@ -216,10 +273,11 @@ export function createLearningEvolutionOrchestrator(options = {}) {
         });
       }
     }
+    await refreshSkills(snapshot.workspaceId);
   }
 
   async function captureSnapshot(snapshot) {
-    if (!snapshot || (policy.mode === "off" && teamPolicy.mode === "off")) return snapshot;
+    if (!snapshot || (policy.mode === "off" && teamPolicy.mode === "off" && skillRetriever.mode === "off")) return snapshot;
     for (const generation of Array.isArray(snapshot.generations) ? snapshot.generations : []) {
       if (generation?.status === "completed") await captureGeneration(snapshot, generation);
     }
@@ -257,8 +315,10 @@ export function createLearningEvolutionOrchestrator(options = {}) {
   }
 
   async function learningStatus() {
-    const [policyStatus, replayStats, teamStatus] = await Promise.all([policy.status(), replay.stats(), teamPolicy.status()]);
-    return { policy: policyStatus, replay: replayStats, team: teamStatus };
+    const [policyStatus, replayStats, teamStatus, skillStatus] = await Promise.all([
+      policy.status(), replay.stats(), teamPolicy.status(), skillRetriever.status(),
+    ]);
+    return { policy: policyStatus, replay: replayStats, team: teamStatus, skills: skillStatus };
   }
 
   async function trainOffline(input = {}) {
@@ -267,9 +327,11 @@ export function createLearningEvolutionOrchestrator(options = {}) {
       policy.trainOffline(trajectories, { reset: input.reset === true }),
       teamPolicy.trainOffline(trajectories, { reset: input.reset === true }),
     ]);
+    const skills = await refreshSkills(input.workspaceId || null);
     return {
       ...strategy,
       team,
+      skills,
       replay: await replay.stats(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
     };
   }
@@ -283,6 +345,8 @@ export function createLearningEvolutionOrchestrator(options = {}) {
     shutdown,
     learningStatus,
     trainOffline,
+    refreshSkills,
+    listSkills: (filter = {}) => skillRegistry.list(filter),
     replayStats: (filter = {}) => replay.stats(filter),
   };
 }
