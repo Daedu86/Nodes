@@ -46,6 +46,10 @@ vi.mock("@/components/workspace/session-context-sheet", () => ({
   SessionContextSheet: () => <button type="button">Context</button>,
 }));
 
+vi.mock("@/components/workspace/evolution-session-sheet", () => ({
+  EvolutionSessionSheet: () => <button type="button">Evolution</button>,
+}));
+
 function HeaderHarness() {
   const { setViewMode, viewMode } = useSessionUiState();
 
