@@ -1,7 +1,7 @@
 import { requireLocalApiUser } from "@/lib/server/request-guards";
 import { runCodexTychoEvolution } from "@/lib/server/codex-tycho-evolution";
 import { getSession } from "@/lib/session-store";
-import { getEvolutionSessionArtifact, parseEvolutionSessionSnapshotContent } from "@/lib/tycho/evolution-session-snapshot";
+import { getEvolutionSessionArtifact } from "@/lib/tycho/evolution-session-snapshot";
 import type { TychoEvolutionSpec } from "@/lib/tycho/evolution-backend";
 
 export const runtime = "nodejs";
@@ -52,33 +52,6 @@ function protocolFromSessionArtifacts(artifacts: Awaited<ReturnType<typeof getSe
   return { experimentId, protocol };
 }
 
-function seedFromSession(session: Awaited<ReturnType<typeof getSession>>) {
-  const evolutionArtifact = getEvolutionSessionArtifact(session.artifacts);
-  if (evolutionArtifact) {
-    const snapshot = parseEvolutionSessionSnapshotContent(evolutionArtifact.content);
-    const champion = snapshot?.champion;
-    if (champion?.spec) {
-      return {
-        id: champion.candidateId,
-        spec: champion.spec,
-        metadata: { seedSource: "persisted-champion", championKey: champion.candidateKey },
-      };
-    }
-  }
-
-  const protocolSpec = protocolFromSessionArtifacts(session.artifacts);
-  if (!protocolSpec) {
-    throw new Error(
-      "No persisted champion or .nodes/tycho-experiment.json artifact is available in this Session.",
-    );
-  }
-  return {
-    id: `seed-${protocolSpec.experimentId}`,
-    spec: protocolSpec,
-    metadata: { seedSource: "session-tycho-protocol" },
-  };
-}
-
 type EvolutionRunBody = {
   workspaceId?: unknown;
   projectId?: unknown;
@@ -124,7 +97,29 @@ export async function POST(request: Request) {
     );
 
     const session = await getSession(sessionId, guarded.user.id);
-    const seed = seedFromSession(session);
+    if (getEvolutionSessionArtifact(session.artifacts)) {
+      return Response.json(
+        {
+          error:
+            "This Session already has an evolution history. Starting another run is blocked to preserve provenance; continuation from the persisted champion requires an append-capable evolution schema.",
+          code: "evolution_history_exists",
+        },
+        { status: 409 },
+      );
+    }
+
+    const protocolSpec = protocolFromSessionArtifacts(session.artifacts);
+    if (!protocolSpec) {
+      throw new Error(
+        "No .nodes/tycho-experiment.json artifact is available in this Session to use as the seed.",
+      );
+    }
+    const seed = {
+      id: `seed-${protocolSpec.experimentId}`,
+      spec: protocolSpec,
+      metadata: { seedSource: "session-tycho-protocol" },
+    };
+
     const completed = await runCodexTychoEvolution({
       ownerId: guarded.user.id,
       sessionId,
