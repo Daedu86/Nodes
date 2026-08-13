@@ -21,9 +21,16 @@ export function EvolutionSessionSheet() {
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button type="button" variant="outline" size="sm" className="gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          aria-label="Open evolution history"
+          title="Open evolution history"
+        >
           <GitBranchIcon className="h-4 w-4" />
-          <span>Evolution</span>
+          <span className="hidden 2xl:inline">Evolution</span>
         </Button>
       </SheetTrigger>
       <SheetContent side="right" className="w-[94vw] gap-0 sm:max-w-3xl">
