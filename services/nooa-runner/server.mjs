@@ -414,7 +414,7 @@ const server = http.createServer(async (req, res) => {
 
     return json(res, 404, { error: "Not found." });
   } catch (error) {
-    console.error("[nooa-runner] request failed", String(error instanceof Error ? error.message : error).replace(/[\r\n\u2028\u2029]/g, " "));
+    console.error("[nooa-runner] request failed");
     return json(res, 500, { error: error instanceof Error ? error.message : "Internal error." });
   }
 });
