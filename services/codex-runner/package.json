@@ -7,8 +7,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "node --check server.mjs && node --check server-launcher.mjs && node --check tycho-readiness.mjs && node --check workspace-artifacts.mjs && node --check evolution-config.mjs && node --check evolution-result.mjs && node --check evolution-workspace.mjs && node --check evolution-server.mjs",
-    "test": "node --test tycho-readiness.test.mjs workspace-artifacts.test.mjs evolution-config.test.mjs evolution-result.test.mjs evolution-workspace.test.mjs",
+    "check": "node --check server.mjs && node --check server-launcher.mjs && node --check tycho-readiness.mjs && node --check workspace-artifacts.mjs && node --check evolution-config.mjs && node --check evolution-result.mjs && node --check evolution-workspace.mjs && node --check codex-evolution-generator.mjs && node --check evolution-orchestrator.mjs && node --check evolution-server.mjs",
+    "test": "node --test tycho-readiness.test.mjs workspace-artifacts.test.mjs evolution-config.test.mjs evolution-result.test.mjs evolution-workspace.test.mjs codex-evolution-generator.test.mjs evolution-orchestrator.test.mjs",
     "start": "node server-launcher.mjs",
     "start:env": "node --env-file=.env server-launcher.mjs",
     "dev": "node --watch server-launcher.mjs",
