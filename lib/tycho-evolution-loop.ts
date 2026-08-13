@@ -255,6 +255,20 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
       return { finalWinner: null, generations, reason, seed, status: "failed" };
     }
 
+    if (variants.length > input.populationSize) {
+      const reason = `Generation ${generation} produced ${variants.length} variants, exceeding populationSize ${input.populationSize}.`;
+      generations.push({
+        attempts: [],
+        error: reason,
+        generation,
+        parent,
+        requestedPopulation: input.populationSize,
+        status: "failed",
+        winner: null,
+      });
+      return { finalWinner: null, generations, reason, seed, status: "failed" };
+    }
+
     const ids = variants.map((variant) => normalizeVariantId(variant.id));
     const invalidId = ids.findIndex((id) => !id);
     const duplicateIds = ids.filter((id, index) => ids.indexOf(id) !== index);
