@@ -16,6 +16,11 @@ export type EvolutionEvaluation = {
   evidence?: Record<string, unknown>;
 };
 
+export type EvolutionResumePoint<TSpec> = {
+  candidate: EvolutionCandidate<TSpec>;
+  evaluation: EvolutionEvaluation | null;
+};
+
 /**
  * Generates the candidate population for one generation.
  *
@@ -123,6 +128,7 @@ export type RunEvolutionLoopInput<TSpec, TExecution, TContext = undefined> = {
   generations: number;
   observer?: EvolutionObserver<TSpec, TExecution>;
   populationSize: number;
+  resumeFrom?: EvolutionResumePoint<TSpec>;
   seed: TychoVariant<TSpec>;
   variantGenerator: EvolutionVariantGenerator<TSpec, TContext>;
 };
@@ -141,6 +147,33 @@ const validatePositiveInteger = (value: number, label: string) => {
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(`${label} must be a positive integer.`);
   }
+};
+
+const normalizeResumePoint = <TSpec>(resumeFrom: EvolutionResumePoint<TSpec>) => {
+  const id = normalizeVariantId(resumeFrom.candidate.id);
+  if (!id) throw new Error("resumeFrom.candidate.id must not be empty.");
+  if (!Number.isInteger(resumeFrom.candidate.generation) || resumeFrom.candidate.generation < 0) {
+    throw new Error("resumeFrom.candidate.generation must be a non-negative integer.");
+  }
+  const expectedKey = buildCandidateKey(resumeFrom.candidate.generation, id);
+  if (resumeFrom.candidate.key !== expectedKey) {
+    throw new Error(
+      `resumeFrom.candidate.key must equal ${expectedKey} to preserve generation provenance.`,
+    );
+  }
+  if (
+    resumeFrom.evaluation !== null &&
+    !Number.isFinite(resumeFrom.evaluation.score)
+  ) {
+    throw new Error("resumeFrom.evaluation.score must be finite when provided.");
+  }
+  return {
+    candidate: {
+      ...resumeFrom.candidate,
+      id,
+    },
+    evaluation: resumeFrom.evaluation,
+  } satisfies EvolutionResumePoint<TSpec>;
 };
 
 const selectWinner = <TSpec, TExecution>(
@@ -224,16 +257,18 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
   const seedId = normalizeVariantId(input.seed.id);
   if (!seedId) throw new Error("seed.id must not be empty.");
 
-  const seed: EvolutionCandidate<TSpec> = {
+  const initialSeed: EvolutionCandidate<TSpec> = {
     ...input.seed,
     id: seedId,
     generation: 0,
     key: buildCandidateKey(0, seedId),
     parentKey: null,
   };
+  const resumePoint = input.resumeFrom ? normalizeResumePoint(input.resumeFrom) : null;
+  const seed = resumePoint?.candidate ?? initialSeed;
   const generations: EvolutionGeneration<TSpec, TExecution>[] = [];
   let parent = seed;
-  let parentEvaluation: EvolutionEvaluation | null = null;
+  let parentEvaluation: EvolutionEvaluation | null = resumePoint?.evaluation ?? null;
   let latestWinner: EvolutionAttempt<TSpec, TExecution> | null = null;
 
   const recordGeneration = async (
@@ -249,7 +284,8 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
     });
   };
 
-  for (let generation = 1; generation <= input.generations; generation += 1) {
+  for (let iteration = 0; iteration < input.generations; iteration += 1) {
+    const generation = parent.generation + 1;
     let variants: readonly TychoVariant<TSpec>[];
     try {
       variants = await input.variantGenerator.generate({
