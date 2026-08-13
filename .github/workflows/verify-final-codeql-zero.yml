@@ -1,5 +1,6 @@
 name: Verify zero CodeQL alerts
 
+# Trigger a one-shot verification after the filesystem race fixes.
 on:
   push:
     branches:
