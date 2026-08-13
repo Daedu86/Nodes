@@ -1,3 +1,5 @@
+import "server-only";
+
 import { getSession, patchSession } from "@/lib/session-store";
 import {
   runEvolutionLoop,
