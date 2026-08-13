@@ -1,7 +1,10 @@
 # Final CodeQL verification
 
 - Analysis found for commit: true
-- Commit: 3f79f51ee0138c0c68f11d990d32c0d68cae3aa3
-- Open alert count: 1
+- Commit: cc51c8815f41c18917d7ed2222bdd076fecd8437
+- Open alert count: 4
 
-- #9 js/http-to-file-access: scripts/rotate-secrets.mjs:406
+- #37 js/log-injection: services/nooa-runner/server.mjs:417
+- #36 js/log-injection: services/codex-runner/server.mjs:515
+- #35 js/log-injection: services/codex-runner/evolution-server.mjs:345
+- #34 js/log-injection: services/codex-runner/evolution-server-kubernetes.mjs:163
