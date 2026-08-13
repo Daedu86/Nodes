@@ -1,5 +1,6 @@
 import { createCurriculumController } from "./curriculum-controller.mjs";
 import { createPolicyController } from "./policy-controller.mjs";
+import { createPredictiveWorldModel } from "./predictive-world-model.mjs";
 import { createTeamPolicyController } from "./team-policy-controller.mjs";
 import { createTrajectoryStore } from "./trajectory-store.mjs";
 import { createSkillRegistry } from "./skill-registry.mjs";
@@ -15,6 +16,7 @@ const policy = createPolicyController({ mode: "online" });
 const teamPolicy = createTeamPolicyController({ mode: "online" });
 const skills = createSkillRegistry();
 const curriculum = createCurriculumController({ mode: "observe" });
+const worldModel = createPredictiveWorldModel({ trajectoryStore: store });
 const trajectories = await store.list(workspaceId ? { workspaceId } : {});
 const [strategy, team] = await Promise.all([
   policy.trainOffline(trajectories, { reset }),
@@ -39,5 +41,6 @@ console.log(JSON.stringify({
     registry: await skills.stats(),
   },
   curriculum: curriculumReport,
+  worldModel: await worldModel.report(workspaceId),
   replay: stats,
 }, null, 2));
