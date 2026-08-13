@@ -1,6 +1,7 @@
 import { createRunnerCodexVariantGenerator } from "./codex-evolution-generator.mjs";
 import { createCurriculumController } from "./curriculum-controller.mjs";
 import { createLearningEvolutionOrchestrator } from "./learning-evolution-orchestrator.mjs";
+import { createModelBasedPlanner } from "./model-based-planner.mjs";
 import { createPredictiveWorldModel } from "./predictive-world-model.mjs";
 import { createSkillRegistry } from "./skill-registry.mjs";
 import { createTrajectoryStore } from "./trajectory-store.mjs";
@@ -35,6 +36,19 @@ function worldModelOptions(learning = {}) {
     costWeight: learning.worldModelCostWeight,
     minSupport: learning.worldModelMinSupport,
     minSimilarity: learning.worldModelMinSimilarity,
+  };
+}
+
+function plannerOptions(learning = {}) {
+  return {
+    mode: learning.plannerMode,
+    maxDepth: learning.plannerMaxDepth,
+    maxBranches: learning.plannerMaxBranches,
+    gamma: learning.plannerGamma,
+    minConfidence: learning.plannerMinConfidence,
+    uncertaintyPenalty: learning.plannerUncertaintyPenalty,
+    minSupport: learning.plannerMinSupport,
+    timeoutMs: learning.plannerTimeoutMs,
   };
 }
 
@@ -84,9 +98,15 @@ export function createCurriculumEvolutionOrchestrator(options = {}) {
     minSupport: learning.worldModelMinSupport ?? process.env.TYCHO_WORLD_MODEL_MIN_SUPPORT,
     minSimilarity: learning.worldModelMinSimilarity ?? process.env.TYCHO_WORLD_MODEL_MIN_SIMILARITY,
   });
+  const planner = options.planner || createModelBasedPlanner({
+    trajectoryStore: replay,
+    ...plannerOptions(learning),
+  });
   const worldGenerator = options.worldModelGenerator || createWorldModelVariantGenerator({
     baseGenerator: rawGenerator,
     worldModel,
+    planner,
+    plannerMode: learning.plannerMode,
     ...worldModelOptions(learning),
   });
 
@@ -143,20 +163,33 @@ export function createCurriculumEvolutionOrchestrator(options = {}) {
     return worldGenerator.status(workspaceId);
   }
 
+  async function plannerStatus(workspaceId = null) {
+    return planner.status(workspaceId);
+  }
+
+  async function plannerPlan(input = {}) {
+    return planner.planPrediction({
+      workspaceId: asString(input.workspaceId),
+      prediction: isRecord(input.prediction) ? input.prediction : {},
+    });
+  }
+
   async function learningStatus() {
-    const [base, curriculumStatus, predictiveStatus] = await Promise.all([
+    const [base, curriculumStatus, predictiveStatus, planningStatus] = await Promise.all([
       core.learningStatus(),
       curriculum.status(),
       worldModelStatus(),
+      plannerStatus(),
     ]);
-    return { ...base, curriculum: curriculumStatus, worldModel: predictiveStatus };
+    return { ...base, curriculum: curriculumStatus, worldModel: predictiveStatus, planner: planningStatus };
   }
 
   async function enrichSnapshot(snapshot) {
     if (!snapshot) return snapshot;
-    const [curriculumStatus, predictiveStatus] = await Promise.all([
+    const [curriculumStatus, predictiveStatus, planningStatus] = await Promise.all([
       curriculum.status(),
       worldModelStatus(snapshot.workspaceId),
+      plannerStatus(snapshot.workspaceId),
     ]);
     return {
       ...snapshot,
@@ -164,6 +197,7 @@ export function createCurriculumEvolutionOrchestrator(options = {}) {
         ...(isRecord(snapshot.learning) ? snapshot.learning : await core.learningStatus()),
         curriculum: curriculumStatus,
         worldModel: predictiveStatus,
+        planner: planningStatus,
       },
     };
   }
@@ -186,6 +220,7 @@ export function createCurriculumEvolutionOrchestrator(options = {}) {
       ...base,
       curriculum: await curriculumReport(input.workspaceId || null, input.defaultDomain || "general-evolution"),
       worldModel: await worldModelStatus(input.workspaceId || null),
+      planner: await plannerStatus(input.workspaceId || null),
     };
   }
 
@@ -200,5 +235,7 @@ export function createCurriculumEvolutionOrchestrator(options = {}) {
     curriculumPlan,
     worldModelStatus,
     worldModelPredict: (input) => worldModel.predict(input),
+    plannerStatus,
+    plannerPlan,
   };
 }
