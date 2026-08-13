@@ -114,7 +114,15 @@ export function createCodexEvolutionVariantGenerator(
           timeoutMs,
           maxOutputChars,
         });
-        return parseCodexEvolutionVariantOutput(output, count);
+        const variants = parseCodexEvolutionVariantOutput(output, count);
+        return variants.map((variant) => ({
+          ...variant,
+          metadata: {
+            ...(variant.metadata ?? {}),
+            generator: "codex",
+            generatorRunId: started.runId,
+          },
+        }));
       } catch (error) {
         await dependencies.cancel(context.ownerId, started.runId).catch(() => undefined);
         throw error;
