@@ -5,6 +5,15 @@ const isRecord = (value) => value && typeof value === "object" && !Array.isArray
 const asString = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
 const safeJson = (value) => JSON.stringify(value, null, 2);
 
+const LOOPBACK_RUNNER_HOSTS = new Set(["127.0.0.1", "localhost"]);
+function requireLoopbackRunnerHost(value) {
+  const host = String(value || "").trim().toLowerCase();
+  if (!LOOPBACK_RUNNER_HOSTS.has(host)) {
+    throw new Error("Evolution runner host must be loopback (127.0.0.1 or localhost).");
+  }
+  return host;
+}
+
 const normalizeWorkspacePath = (value) => String(value || "").trim().replaceAll("\\", "/");
 
 function validateWorkspacePath(rawPath) {
@@ -252,7 +261,7 @@ async function consumeGeneratorStream(response, options) {
 
 export function createRunnerCodexVariantGenerator(options = {}) {
   const port = Number(options.codexPort || process.env.CODEX_RUNNER_PORT || 8787);
-  const host = options.host || "127.0.0.1";
+  const host = requireLoopbackRunnerHost(options.host || "127.0.0.1");
   const token = options.token ?? process.env.CODEX_RUNNER_TOKEN?.trim() ?? null;
   const baseUrl = `http://${host}:${port}`;
 

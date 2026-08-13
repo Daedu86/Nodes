@@ -18,6 +18,15 @@ const asString = (value) => (typeof value === "string" && value.trim() ? value.t
 const errorMessage = (error) => error instanceof Error && error.message.trim() ? error.message : String(error || "Unknown evolution error");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const LOOPBACK_RUNNER_HOSTS = new Set(["127.0.0.1", "localhost"]);
+function requireLoopbackRunnerHost(value) {
+  const host = String(value || "").trim().toLowerCase();
+  if (!LOOPBACK_RUNNER_HOSTS.has(host)) {
+    throw new Error("Evolution runner host must be loopback (127.0.0.1 or localhost).");
+  }
+  return host;
+}
+
 function boundedInteger(value, fallback, max, label) {
   const resolved = value === undefined ? fallback : Number(value);
   if (!Number.isInteger(resolved) || resolved <= 0 || resolved > max) {
@@ -189,7 +198,7 @@ function publicRun(run) {
 
 export function createDurableEvolutionOrchestrator(options = {}) {
   const evolutionPort = Number(options.evolutionPort || process.env.TYCHO_EVOLUTION_RUNNER_PORT || (Number(process.env.CODEX_RUNNER_PORT || 8787) + 1));
-  const evolutionHost = options.host || "127.0.0.1";
+  const evolutionHost = requireLoopbackRunnerHost(options.host || "127.0.0.1");
   const evolutionBaseUrl = `http://${evolutionHost}:${evolutionPort}`;
   const token = options.token ?? process.env.CODEX_RUNNER_TOKEN?.trim() ?? null;
   const stateDir = path.resolve(options.stateDir || process.env.TYCHO_EVOLUTION_STATE_DIR || path.join(os.homedir(), ".nodes-ai-canvas", "evolution-runs"));

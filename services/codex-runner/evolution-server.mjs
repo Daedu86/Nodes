@@ -342,7 +342,7 @@ const server = http.createServer(async (req, res) => {
     return json(res, 404, { error: "Not found." });
   } catch (error) {
     const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
-    console.error("[tycho-evolution-runner] request failed", error);
+    console.error("[tycho-evolution-runner] request failed", String(error instanceof Error ? error.message : error).replace(/[\r\n\u2028\u2029]/g, " "));
     return json(res, status, { error: error instanceof Error ? error.message : "Internal error." });
   }
 });

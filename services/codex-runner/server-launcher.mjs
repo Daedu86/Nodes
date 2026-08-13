@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -67,8 +67,9 @@ const bindLocalImport = (input, fileName) => {
 patched = bindLocalImport(patched, "tycho-readiness.mjs");
 patched = bindLocalImport(patched, "workspace-artifacts.mjs");
 
-const runtimePath = path.join(os.tmpdir(), `nodes-codex-runner-${process.pid}.mjs`);
-await writeFile(runtimePath, patched, "utf8");
+const runtimeDirectory = await mkdtemp(path.join(os.tmpdir(), "nodes-codex-runner-"));
+const runtimePath = path.join(runtimeDirectory, "server.mjs");
+await writeFile(runtimePath, patched, { encoding: "utf8", mode: 0o600, flag: "wx" });
 
 // Both listeners live on the trusted runner machine. The existing Codex
 // control plane remains on CODEX_RUNNER_PORT; Tycho candidate execution and the

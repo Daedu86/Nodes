@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -292,15 +292,15 @@ async function startRun(body, ownerId) {
   const workspace = resolveWorkspace(input, WORKSPACES, DEFAULT_CWD);
   const policy = resolveOpenShellPolicy(input.sandbox.policyId, POLICIES);
   const runId = randomUUID();
-  const inputDirectory = path.join(RUNS_DIR, runId);
-  mkdirSync(inputDirectory, { recursive: true });
+  mkdirSync(RUNS_DIR, { recursive: true, mode: 0o700 });
+  const inputDirectory = mkdtempSync(path.join(RUNS_DIR, "run-"));
   const inputPath = path.join(inputDirectory, "run.json");
   const run = makeRunRecord({ runId, ownerId, input, workspace, policy, inputPath });
   runs.set(runId, run);
   publish(run, "run.queued", "runtime", { policyId: policy.id });
 
   try {
-    writeFileSync(inputPath, JSON.stringify(makeSandboxInput(run, input, workspace)), "utf8");
+    writeFileSync(inputPath, JSON.stringify(makeSandboxInput(run, input, workspace)), { encoding: "utf8", mode: 0o600, flag: "wx" });
     startSandbox(run, input, workspace, policy);
     return run;
   } catch (error) {
@@ -414,7 +414,7 @@ const server = http.createServer(async (req, res) => {
 
     return json(res, 404, { error: "Not found." });
   } catch (error) {
-    console.error("[nooa-runner] request failed", error);
+    console.error("[nooa-runner] request failed", String(error instanceof Error ? error.message : error).replace(/[\r\n\u2028\u2029]/g, " "));
     return json(res, 500, { error: error instanceof Error ? error.message : "Internal error." });
   }
 });
