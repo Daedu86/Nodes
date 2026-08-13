@@ -16,7 +16,15 @@ export type EvolutionEvaluation = {
   evidence?: Record<string, unknown>;
 };
 
-export type TychoVariantGenerator<TSpec, TContext = undefined> = {
+/**
+ * Generates the candidate population for one generation.
+ *
+ * Candidate generation is deliberately separate from experiment execution. In
+ * the current Nodes/Tycho split, Luna/Codex can formulate hypotheses while the
+ * Tycho harness executes and verifies them. A future optimizer can implement
+ * this same contract without changing the evolution loop.
+ */
+export type EvolutionVariantGenerator<TSpec, TContext = undefined> = {
   generate: (input: {
     context: TContext;
     count: number;
@@ -25,6 +33,11 @@ export type TychoVariantGenerator<TSpec, TContext = undefined> = {
   }) => Promise<readonly TychoVariant<TSpec>[]>;
 };
 
+/**
+ * Backend-neutral execution boundary. The current Tycho experiment harness can
+ * implement this contract locally; a later kagent/Kubernetes adapter can map
+ * each candidate to an isolated job without changing selection semantics.
+ */
 export type EvolutionExecutionBackend<TSpec, TExecution, TContext = undefined> = {
   execute: (input: {
     candidate: EvolutionCandidate<TSpec>;
@@ -94,7 +107,7 @@ export type RunEvolutionLoopInput<TSpec, TExecution, TContext = undefined> = {
   generations: number;
   populationSize: number;
   seed: TychoVariant<TSpec>;
-  variantGenerator: TychoVariantGenerator<TSpec, TContext>;
+  variantGenerator: EvolutionVariantGenerator<TSpec, TContext>;
 };
 
 const toErrorMessage = (error: unknown) => {
