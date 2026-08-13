@@ -100,11 +100,27 @@ export type EvolutionResult<TSpec, TExecution> =
   | EvolutionCompletedResult<TSpec, TExecution>
   | EvolutionFailedResult<TSpec, TExecution>;
 
+/**
+ * Optional side-effect boundary for persistence/telemetry. It fires exactly
+ * once after each generation reaches a terminal state. Observer failures are
+ * intentionally propagated so callers can fail closed when authoritative
+ * provenance cannot be persisted.
+ */
+export type EvolutionObserver<TSpec, TExecution> = {
+  onGenerationComplete?: (input: {
+    generation: EvolutionGeneration<TSpec, TExecution>;
+    generations: readonly EvolutionGeneration<TSpec, TExecution>[];
+    latestWinner: EvolutionAttempt<TSpec, TExecution> | null;
+    seed: EvolutionCandidate<TSpec>;
+  }) => Promise<void> | void;
+};
+
 export type RunEvolutionLoopInput<TSpec, TExecution, TContext = undefined> = {
   context: TContext;
   evaluator: EvolutionEvaluator<TSpec, TExecution, TContext>;
   executionBackend: EvolutionExecutionBackend<TSpec, TExecution, TContext>;
   generations: number;
+  observer?: EvolutionObserver<TSpec, TExecution>;
   populationSize: number;
   seed: TychoVariant<TSpec>;
   variantGenerator: EvolutionVariantGenerator<TSpec, TContext>;
@@ -218,6 +234,19 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
   let parent = seed;
   let latestWinner: EvolutionAttempt<TSpec, TExecution> | null = null;
 
+  const recordGeneration = async (
+    generationRecord: EvolutionGeneration<TSpec, TExecution>,
+    winner: EvolutionAttempt<TSpec, TExecution> | null,
+  ) => {
+    generations.push(generationRecord);
+    await input.observer?.onGenerationComplete?.({
+      generation: generationRecord,
+      generations: [...generations],
+      latestWinner: winner,
+      seed,
+    });
+  };
+
   for (let generation = 1; generation <= input.generations; generation += 1) {
     let variants: readonly TychoVariant<TSpec>[];
     try {
@@ -229,7 +258,7 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
       });
     } catch (error) {
       const reason = `Generation ${generation} variant generation failed: ${toErrorMessage(error)}`;
-      generations.push({
+      await recordGeneration({
         attempts: [],
         error: reason,
         generation,
@@ -237,13 +266,13 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
         requestedPopulation: input.populationSize,
         status: "failed",
         winner: null,
-      });
+      }, latestWinner);
       return { finalWinner: null, generations, reason, seed, status: "failed" };
     }
 
     if (variants.length === 0) {
       const reason = `Generation ${generation} produced no variants.`;
-      generations.push({
+      await recordGeneration({
         attempts: [],
         error: reason,
         generation,
@@ -251,13 +280,13 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
         requestedPopulation: input.populationSize,
         status: "failed",
         winner: null,
-      });
+      }, latestWinner);
       return { finalWinner: null, generations, reason, seed, status: "failed" };
     }
 
     if (variants.length > input.populationSize) {
       const reason = `Generation ${generation} produced ${variants.length} variants, exceeding populationSize ${input.populationSize}.`;
-      generations.push({
+      await recordGeneration({
         attempts: [],
         error: reason,
         generation,
@@ -265,7 +294,7 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
         requestedPopulation: input.populationSize,
         status: "failed",
         winner: null,
-      });
+      }, latestWinner);
       return { finalWinner: null, generations, reason, seed, status: "failed" };
     }
 
@@ -276,7 +305,7 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
       const reason = invalidId >= 0
         ? `Generation ${generation} contains a variant with an empty id.`
         : `Generation ${generation} contains duplicate variant ids: ${[...new Set(duplicateIds)].join(", ")}.`;
-      generations.push({
+      await recordGeneration({
         attempts: [],
         error: reason,
         generation,
@@ -284,7 +313,7 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
         requestedPopulation: input.populationSize,
         status: "failed",
         winner: null,
-      });
+      }, latestWinner);
       return { finalWinner: null, generations, reason, seed, status: "failed" };
     }
 
@@ -312,7 +341,7 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
 
     if (!winner) {
       const reason = `Generation ${generation} has no successfully evaluated candidates.`;
-      generations.push({
+      await recordGeneration({
         attempts,
         error: reason,
         generation,
@@ -320,11 +349,12 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
         requestedPopulation: input.populationSize,
         status: "failed",
         winner: null,
-      });
+      }, latestWinner);
       return { finalWinner: null, generations, reason, seed, status: "failed" };
     }
 
-    generations.push({
+    latestWinner = winner;
+    await recordGeneration({
       attempts,
       error: null,
       generation,
@@ -332,8 +362,7 @@ export async function runEvolutionLoop<TSpec, TExecution, TContext = undefined>(
       requestedPopulation: input.populationSize,
       status: "completed",
       winner,
-    });
-    latestWinner = winner;
+    }, latestWinner);
     parent = winner.candidate;
   }
 
