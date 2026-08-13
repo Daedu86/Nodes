@@ -5,6 +5,7 @@ const ownerId = "m2-integration-owner";
 const experimentId = `m2-k8s-${Date.now()}`;
 const timeoutMs = Number(process.env.NODES_KUBERNETES_INTEGRATION_TIMEOUT_MS || 180_000);
 const pollMs = Number(process.env.NODES_KUBERNETES_INTEGRATION_POLL_MS || 500);
+const expectedSourceMarker = process.env.NODES_KUBERNETES_INTEGRATION_SOURCE_MARKER?.trim() || "";
 
 const protocol = {
   schemaVersion: 1,
@@ -19,7 +20,7 @@ const protocol = {
   steps: [{
     id: "verify-kubernetes",
     script: ".nodes/m2-kubernetes-verify.py",
-    args: ["--output", ".nodes/m2-kubernetes-metrics.json"],
+    args: ["--output", ".nodes/m2-kubernetes-metrics.json", "--source-marker", expectedSourceMarker],
     timeoutSeconds: 30,
     checks: [
       { kind: "exit_code", equals: 0 },
@@ -30,7 +31,7 @@ const protocol = {
   metadata: { source: "nodes-m2-kind-integration" },
 };
 
-const verifyScript = `import argparse, json, os, pathlib\nparser=argparse.ArgumentParser()\nparser.add_argument('--output', required=True)\nargs=parser.parse_args()\nassert os.environ.get('CODEX_RUNNER_TOKEN') is None\nassert os.environ.get('OPENAI_API_KEY') is None\npath=pathlib.Path(args.output)\npath.parent.mkdir(parents=True, exist_ok=True)\npath.write_text(json.dumps({'metrics': {'kubernetes': 1}}), encoding='utf-8')\nprint('kubernetes candidate verified')\n`;
+const verifyScript = `import argparse, json, os, pathlib\nparser=argparse.ArgumentParser()\nparser.add_argument('--output', required=True)\nparser.add_argument('--source-marker', default='')\nargs=parser.parse_args()\nassert os.environ.get('CODEX_RUNNER_TOKEN') is None\nassert os.environ.get('OPENAI_API_KEY') is None\nif args.source_marker:\n    assert pathlib.Path('m2-source-marker.txt').read_text(encoding='utf-8').strip() == args.source_marker\npath=pathlib.Path(args.output)\npath.parent.mkdir(parents=True, exist_ok=True)\npath.write_text(json.dumps({'metrics': {'kubernetes': 1}}), encoding='utf-8')\nprint('kubernetes candidate verified')\n`;
 
 const backend = createKubernetesEvolutionBackend();
 const readiness = await backend.ready();
