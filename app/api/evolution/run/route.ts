@@ -5,12 +5,13 @@ import { getEvolutionSessionArtifact } from "@/lib/tycho/evolution-session-snaps
 import type { TychoEvolutionSpec } from "@/lib/tycho/evolution-backend";
 
 export const runtime = "nodejs";
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 const MAX_GENERATIONS = 6;
 const MAX_POPULATION = 12;
-const MAX_CANDIDATE_TIMEOUT_MS = 180_000;
-const MAX_GENERATOR_TIMEOUT_MS = 90_000;
+const MAX_CANDIDATE_TIMEOUT_MS = 120_000;
+const MAX_GENERATOR_TIMEOUT_MS = 60_000;
+const MAX_REQUEST_BUDGET_MS = 240_000;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -85,16 +86,22 @@ export async function POST(request: Request) {
     const populationSize = positiveInteger(body.populationSize, 3, MAX_POPULATION, "populationSize");
     const timeoutMs = boundedDuration(
       body.candidateTimeoutMs,
-      120_000,
+      75_000,
       MAX_CANDIDATE_TIMEOUT_MS,
       "candidateTimeoutMs",
     );
     const generatorTimeoutMs = boundedDuration(
       body.generatorTimeoutMs,
-      60_000,
+      45_000,
       MAX_GENERATOR_TIMEOUT_MS,
       "generatorTimeoutMs",
     );
+    const theoreticalBudgetMs = generations * (timeoutMs + generatorTimeoutMs);
+    if (theoreticalBudgetMs > MAX_REQUEST_BUDGET_MS) {
+      throw new Error(
+        `Requested evolution budget (${theoreticalBudgetMs}ms) exceeds the ${MAX_REQUEST_BUDGET_MS}ms request safety budget. Reduce generations or timeouts.`,
+      );
+    }
 
     const session = await getSession(sessionId, guarded.user.id);
     if (getEvolutionSessionArtifact(session.artifacts)) {
