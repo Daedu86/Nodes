@@ -128,7 +128,7 @@ Expected fields include:
 }
 ```
 
-`kagentReady` indicates that the kagent Agent CRD is installed. Candidate execution remains deterministic and does not depend on an LLM decision from kagent.
+`kagentReady` requires both the `agents.kagent.dev` CRD and the Nodes `nodes-evolution-observer` Agent to be present. Candidate execution remains deterministic and does not depend on an LLM decision from kagent.
 
 ## Live M2 acceptance
 
@@ -144,7 +144,7 @@ node --env-file=.env kubernetes-evolution-smoke.mjs
 The smoke fails closed unless:
 
 1. Kubernetes readiness passes.
-2. kagent CRDs are present.
+2. kagent CRDs and the Nodes read-only observer are present.
 3. The requested workspace ID is allowlisted.
 4. Codex/Luna generates the requested population.
 5. Tycho candidate Jobs finish and return `sandbox.runtime=kubernetes` evidence.
