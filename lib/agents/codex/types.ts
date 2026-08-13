@@ -19,7 +19,7 @@ export type CodexApprovalDecision =
   | "decline"
   | "cancel";
 
-export type CodexRunnerApprovalMode = "interactive" | "tycho-isolated";
+export type CodexRunnerApprovalMode = "interactive" | "tycho-isolated" | "hypothesis-only";
 
 export type CodexWorkspaceFile = {
   path: string;
