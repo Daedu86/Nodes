@@ -13,7 +13,9 @@ The loop keeps generation, execution, evaluation, and persistence as separate co
 
 ## Safety boundaries
 
-The Codex generator uses an interactive runner invocation with no injected workspace files. Its prompt requires JSON-only hypothesis output and treats the parent spec/evaluation as untrusted data. If Codex requests an approval, the generator cancels the run and fails closed.
+The Codex generator uses an interactive runner invocation with no injected workspace files. Its prompt requires JSON-only hypothesis output and treats the parent spec/evaluation as untrusted data.
+
+Hypothesis generation is fail-closed and execution-free. The generator cancels the run if Codex requests an approval or if the event stream reports tool execution, shell execution, file mutation, or child-agent spawning. Both started and completed tool/shell events are rejected so reconnect or stream timing cannot hide execution activity.
 
 Generated candidate workspace paths must remain relative, cannot traverse parents, and cannot replace `.nodes/tycho-experiment.json`, which Nodes injects authoritatively for Tycho execution.
 
