@@ -5,7 +5,7 @@ import http from "node:http";
 import path from "node:path";
 
 import { readEvolutionRunnerConfig } from "./evolution-config.mjs";
-import { createDurableEvolutionOrchestrator } from "./evolution-orchestrator.mjs";
+import { createLearningEvolutionOrchestrator } from "./learning-evolution-orchestrator.mjs";
 import { readTychoReadiness } from "./tycho-readiness.mjs";
 import { normalizeWorkspaceFiles } from "./workspace-artifacts.mjs";
 import { createEvolutionWorkspace, cleanupEvolutionWorkspace } from "./evolution-workspace.mjs";
@@ -22,7 +22,7 @@ const MAX_CAPTURE_CHARS = 20_000;
 
 const runs = new Map();
 const active = new Set();
-const durable = createDurableEvolutionOrchestrator({
+const durable = createLearningEvolutionOrchestrator({
   host: "127.0.0.1",
   evolutionPort: PORT,
   token: RUNNER_TOKEN,
@@ -233,14 +233,32 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (url.pathname === "/readyz" && req.method === "GET") {
-      const tycho = await readTychoReadiness();
+      const [tycho, learning] = await Promise.all([readTychoReadiness(), durable.learningStatus()]);
       return json(res, tycho.tychoReady ? 200 : 503, {
         ok: tycho.tychoReady === true,
         ...tycho,
         workspaceIds: [...WORKSPACES.keys()],
         maxConcurrency: MAX_CONCURRENCY,
         durableEvolution: true,
+        learning,
       });
+    }
+
+    if (url.pathname === "/v1/evolution/learning/status" && req.method === "GET") {
+      return json(res, 200, await durable.learningStatus());
+    }
+
+    if (url.pathname === "/v1/evolution/learning/replay" && req.method === "GET") {
+      const workspaceId = asString(url.searchParams.get("workspaceId"));
+      return json(res, 200, await durable.replayStats(workspaceId ? { workspaceId } : {}));
+    }
+
+    if (url.pathname === "/v1/evolution/learning/train" && req.method === "POST") {
+      const body = await readJson(req);
+      return json(res, 200, await durable.trainOffline({
+        workspaceId: asString(body.workspaceId),
+        reset: body.reset === true,
+      }));
     }
 
     if (url.pathname === "/v1/evolution/episodes" && req.method === "POST") {
