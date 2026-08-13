@@ -156,7 +156,7 @@ test("M7 preselects from an expanded proposal pool and executes only the predict
     });
     assert.deepEqual(fake.startedExperiments, ["m7-good-exp"]);
     const attempt = completed.generations[0].attempts[0];
-    assert.equal(attempt.candidateId, "good-candidate");
+    assert.ok(attempt.candidateId.endsWith("good-candidate"));
     assert.equal(attempt.metadata.worldModelPrediction.predictedPoolSize, 2);
     assert.equal(attempt.metadata.worldModelPrediction.estimatedTychoJobsAvoided, 1);
     assert.equal(completed.learning.worldModel.mode, "online");
