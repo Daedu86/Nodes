@@ -62,8 +62,10 @@ describe("Codex evolution generator stream", () => {
   });
 
   it.each([
-    ["shell execution", { method: "item/started", params: { item: { type: "shellCommand" } } }],
-    ["tool execution", { method: "item/started", params: { item: { type: "toolCall" } } }],
+    ["shell start", { method: "item/started", params: { item: { type: "shellCommand" } } }],
+    ["shell completion", { method: "item/completed", params: { item: { type: "shellCommand" } } }],
+    ["tool start", { method: "item/started", params: { item: { type: "toolCall" } } }],
+    ["tool completion", { method: "item/completed", params: { item: { type: "toolCall" } } }],
     ["file mutation", { method: "item/completed", params: { item: { type: "filePatch" } } }],
     ["child agent", { method: "agent/child/spawned", params: { agentId: "child-1" } }],
   ])("fails closed on %s during hypothesis generation", async (_label, notification) => {
