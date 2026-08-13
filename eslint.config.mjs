@@ -26,6 +26,15 @@ export default defineConfig([
     },
   },
   {
+    files: ["services/codex-runner/kubernetes-evolution-backend.mjs"],
+    rules: {
+      // Kubernetes readiness intentionally retries a cluster-scoped namespace
+      // lookup after any namespaced-form failure; the first exception value itself
+      // is irrelevant, while all other unused-variable checks remain strict.
+      "@typescript-eslint/no-unused-vars": ["warn", { caughtErrors: "none" }],
+    },
+  },
+  {
     files: ["tests/e2e/smoke.spec.ts"],
     rules: {
       // The smoke suite intentionally retains intermediate snapshots for

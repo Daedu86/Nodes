@@ -72,6 +72,16 @@ await writeFile(runtimePath, patched, "utf8");
 
 // Both listeners live on the trusted runner machine. The existing Codex
 // control plane remains on CODEX_RUNNER_PORT; Tycho candidate execution and the
-// durable episode orchestrator share TYCHO_EVOLUTION_RUNNER_PORT.
+// durable episode orchestrator share TYCHO_EVOLUTION_RUNNER_PORT. Kubernetes
+// execution swaps only this second listener; the Codex hypothesis generator and
+// durable episode contract stay unchanged.
+const executionBackend = (process.env.TYCHO_EVOLUTION_EXECUTION_BACKEND || "local").trim().toLowerCase();
+if (!["local", "kubernetes"].includes(executionBackend)) {
+  throw new Error("TYCHO_EVOLUTION_EXECUTION_BACKEND must be local or kubernetes.");
+}
+const evolutionServerFile = executionBackend === "kubernetes"
+  ? "evolution-server-kubernetes.mjs"
+  : "evolution-server.mjs";
+
 await import(pathToFileURL(runtimePath).href);
-await import(pathToFileURL(path.join(runnerDir, "evolution-server.mjs")).href);
+await import(pathToFileURL(path.join(runnerDir, evolutionServerFile)).href);

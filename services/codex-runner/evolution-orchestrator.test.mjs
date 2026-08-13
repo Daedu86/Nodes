@@ -146,7 +146,17 @@ test("durable orchestrator checkpoints generations and feeds winner reward forwa
     assert.equal(calls[1].parentKey, "g1:v1b");
     assert.ok(calls[1].parentEvaluation.score > 2);
 
-    const state = JSON.parse(await readFile(path.join(stateDir, `${started.runId}.json`), "utf8"));
+    // The public in-memory status can become terminal immediately before the
+    // final atomic rename finishes. Recovery is a disk-level guarantee, so wait
+    // for the terminal checkpoint itself rather than racing that final rename.
+    const state = await waitFor(async () => {
+      try {
+        const persisted = JSON.parse(await readFile(path.join(stateDir, `${started.runId}.json`), "utf8"));
+        return persisted.status === "completed" ? persisted : null;
+      } catch {
+        return null;
+      }
+    });
     assert.equal(state.status, "completed");
     assert.equal(state.generations.length, 2);
 
