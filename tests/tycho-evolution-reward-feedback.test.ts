@@ -6,7 +6,6 @@ import {
 } from "../lib/tycho-evolution-loop";
 
 type Spec = { value: number };
-type Execution = { value: number };
 
 describe("tycho evolution reward feedback", () => {
   it("passes null for the seed and the winning evaluation into the next generation", async () => {
