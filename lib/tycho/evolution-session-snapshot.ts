@@ -8,7 +8,7 @@ import type {
   TychoEvolutionSpec,
 } from "@/lib/tycho/evolution-backend";
 
-export const EVOLUTION_SESSION_SCHEMA_VERSION = 1 as const;
+export const EVOLUTION_SESSION_SCHEMA_VERSION = 2 as const;
 export const EVOLUTION_SESSION_FILE_NAME = ".nodes/evolution-session.json";
 export const EVOLUTION_SESSION_TITLE = "Evolution Session";
 
@@ -22,6 +22,7 @@ export type EvolutionCandidateSnapshot = {
   generation: number;
   index: number;
   isWinner: boolean;
+  metadata: Record<string, unknown> | null;
   metrics: Record<string, number> | null;
   parentKey: string | null;
   runId: string | null;
@@ -43,16 +44,34 @@ export type EvolutionChampionSnapshot = EvolutionCandidateSnapshot & {
   spec: TychoEvolutionSpec;
 };
 
+export type EvolutionSeedSnapshot = {
+  candidateId: string;
+  candidateKey: string;
+  experimentId: string;
+};
+
+export type EvolutionEpisodeSnapshot = {
+  episodeId: string;
+  index: number;
+  status: "running" | "completed" | "failed";
+  seed: EvolutionSeedSnapshot;
+  startGeneration: number;
+  endGeneration: number | null;
+  generations: EvolutionGenerationSnapshot[];
+  champion: EvolutionChampionSnapshot | null;
+  reason: string | null;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+};
+
 export type EvolutionSessionSnapshot = {
   schemaVersion: typeof EVOLUTION_SESSION_SCHEMA_VERSION;
   sessionId: string;
   projectId: string | null;
   status: "running" | "completed" | "failed";
-  seed: {
-    candidateId: string;
-    candidateKey: string;
-    experimentId: string;
-  };
+  seed: EvolutionSeedSnapshot;
+  episodes: EvolutionEpisodeSnapshot[];
   generations: EvolutionGenerationSnapshot[];
   champion: EvolutionChampionSnapshot | null;
   reason: string | null;
@@ -92,7 +111,12 @@ const numericRecordOrNull = (value: unknown) => {
   );
 };
 
-const isCandidateSnapshot = (value: unknown): value is EvolutionCandidateSnapshot => {
+const recordOrNull = (value: unknown) => value === null || isRecord(value);
+
+const isCandidateSnapshot = (
+  value: unknown,
+  options: { allowMissingMetadata?: boolean } = {},
+): value is EvolutionCandidateSnapshot => {
   if (!isRecord(value)) return false;
   const error = value.error;
   const validError =
@@ -100,6 +124,9 @@ const isCandidateSnapshot = (value: unknown): value is EvolutionCandidateSnapsho
     (isRecord(error) &&
       typeof error.message === "string" &&
       (error.stage === "execution" || error.stage === "evaluation"));
+  const validMetadata = options.allowMissingMetadata && value.metadata === undefined
+    ? true
+    : recordOrNull(value.metadata);
   return (
     typeof value.candidateId === "string" &&
     typeof value.candidateKey === "string" &&
@@ -110,6 +137,7 @@ const isCandidateSnapshot = (value: unknown): value is EvolutionCandidateSnapsho
     Number.isInteger(value.generation) &&
     Number.isInteger(value.index) &&
     typeof value.isWinner === "boolean" &&
+    validMetadata &&
     numericRecordOrNull(value.metrics) &&
     nullableString(value.parentKey) &&
     nullableString(value.runId) &&
@@ -118,12 +146,64 @@ const isCandidateSnapshot = (value: unknown): value is EvolutionCandidateSnapsho
   );
 };
 
-export function parseEvolutionSessionSnapshot(value: unknown): EvolutionSessionSnapshot | null {
-  if (!isRecord(value) || value.schemaVersion !== EVOLUTION_SESSION_SCHEMA_VERSION) return null;
+const normalizeCandidateMetadata = <T extends EvolutionCandidateSnapshot>(value: T): T =>
+  ({ ...value, metadata: value.metadata ?? null });
+
+const isSeedSnapshot = (value: unknown): value is EvolutionSeedSnapshot =>
+  isRecord(value) &&
+  typeof value.candidateId === "string" &&
+  typeof value.candidateKey === "string" &&
+  typeof value.experimentId === "string";
+
+const parseGeneration = (
+  value: unknown,
+  options: { allowMissingMetadata?: boolean } = {},
+): EvolutionGenerationSnapshot | null => {
   if (
+    !isRecord(value) ||
+    !Array.isArray(value.attempts) ||
+    !value.attempts.every((attempt) => isCandidateSnapshot(attempt, options)) ||
+    !nullableString(value.error) ||
+    !Number.isInteger(value.generation) ||
+    typeof value.parentKey !== "string" ||
+    !Number.isInteger(value.requestedPopulation) ||
+    !isGenerationStatus(value.status) ||
+    !nullableString(value.winnerKey)
+  ) {
+    return null;
+  }
+  return {
+    ...(value as unknown as EvolutionGenerationSnapshot),
+    attempts: value.attempts.map((attempt) =>
+      normalizeCandidateMetadata(attempt as EvolutionCandidateSnapshot),
+    ),
+  };
+};
+
+const parseChampion = (
+  value: unknown,
+  options: { allowMissingMetadata?: boolean } = {},
+): EvolutionChampionSnapshot | null | undefined => {
+  if (value === null) return null;
+  const championSpec = isRecord(value) ? value.spec : null;
+  if (!isCandidateSnapshot(value, options) || !isRecord(championSpec)) return undefined;
+  if (
+    typeof championSpec.experimentId !== "string" ||
+    !isRecord(championSpec.protocol)
+  ) {
+    return undefined;
+  }
+  return normalizeCandidateMetadata(value as EvolutionChampionSnapshot);
+};
+
+const parseV2 = (value: Record<string, unknown>): EvolutionSessionSnapshot | null => {
+  if (
+    value.schemaVersion !== EVOLUTION_SESSION_SCHEMA_VERSION ||
     typeof value.sessionId !== "string" ||
     !nullableString(value.projectId) ||
     !isSnapshotStatus(value.status) ||
+    !isSeedSnapshot(value.seed) ||
+    !Array.isArray(value.episodes) ||
     !Array.isArray(value.generations) ||
     !nullableString(value.reason) ||
     typeof value.startedAt !== "string" ||
@@ -133,44 +213,108 @@ export function parseEvolutionSessionSnapshot(value: unknown): EvolutionSessionS
     return null;
   }
 
-  if (!isRecord(value.seed)) return null;
+  const generations = value.generations.map((generation) => parseGeneration(generation));
+  if (generations.some((generation) => generation === null)) return null;
+
+  const champion = parseChampion(value.champion);
+  if (champion === undefined) return null;
+
+  const episodes: EvolutionEpisodeSnapshot[] = [];
+  for (const rawEpisode of value.episodes) {
+    if (
+      !isRecord(rawEpisode) ||
+      typeof rawEpisode.episodeId !== "string" ||
+      !Number.isInteger(rawEpisode.index) ||
+      !isSnapshotStatus(rawEpisode.status) ||
+      !isSeedSnapshot(rawEpisode.seed) ||
+      !Number.isInteger(rawEpisode.startGeneration) ||
+      !(rawEpisode.endGeneration === null || Number.isInteger(rawEpisode.endGeneration)) ||
+      !Array.isArray(rawEpisode.generations) ||
+      !nullableString(rawEpisode.reason) ||
+      typeof rawEpisode.startedAt !== "string" ||
+      typeof rawEpisode.updatedAt !== "string" ||
+      !nullableString(rawEpisode.finishedAt)
+    ) {
+      return null;
+    }
+    const episodeGenerations = rawEpisode.generations.map((generation) => parseGeneration(generation));
+    if (episodeGenerations.some((generation) => generation === null)) return null;
+    const episodeChampion = parseChampion(rawEpisode.champion);
+    if (episodeChampion === undefined) return null;
+    episodes.push({
+      ...(rawEpisode as unknown as EvolutionEpisodeSnapshot),
+      generations: episodeGenerations as EvolutionGenerationSnapshot[],
+      champion: episodeChampion,
+    });
+  }
+
+  return {
+    ...(value as unknown as EvolutionSessionSnapshot),
+    episodes,
+    generations: generations as EvolutionGenerationSnapshot[],
+    champion,
+  };
+};
+
+const migrateV1 = (value: Record<string, unknown>): EvolutionSessionSnapshot | null => {
   if (
-    typeof value.seed.candidateId !== "string" ||
-    typeof value.seed.candidateKey !== "string" ||
-    typeof value.seed.experimentId !== "string"
+    value.schemaVersion !== 1 ||
+    typeof value.sessionId !== "string" ||
+    !nullableString(value.projectId) ||
+    !isSnapshotStatus(value.status) ||
+    !isSeedSnapshot(value.seed) ||
+    !Array.isArray(value.generations) ||
+    !nullableString(value.reason) ||
+    typeof value.startedAt !== "string" ||
+    typeof value.updatedAt !== "string" ||
+    !nullableString(value.finishedAt)
   ) {
     return null;
   }
 
-  const generations = value.generations as unknown[];
-  for (const generation of generations) {
-    if (
-      !isRecord(generation) ||
-      !Array.isArray(generation.attempts) ||
-      !generation.attempts.every(isCandidateSnapshot) ||
-      !nullableString(generation.error) ||
-      !Number.isInteger(generation.generation) ||
-      typeof generation.parentKey !== "string" ||
-      !Number.isInteger(generation.requestedPopulation) ||
-      !isGenerationStatus(generation.status) ||
-      !nullableString(generation.winnerKey)
-    ) {
-      return null;
-    }
-  }
+  const generations = value.generations.map((generation) =>
+    parseGeneration(generation, { allowMissingMetadata: true }),
+  );
+  if (generations.some((generation) => generation === null)) return null;
+  const champion = parseChampion(value.champion, { allowMissingMetadata: true });
+  if (champion === undefined) return null;
+  const normalizedGenerations = generations as EvolutionGenerationSnapshot[];
+  const startGeneration = normalizedGenerations[0]?.generation ?? 1;
+  const endGeneration = normalizedGenerations.at(-1)?.generation ?? null;
+  const episode: EvolutionEpisodeSnapshot = {
+    episodeId: "episode-1",
+    index: 1,
+    status: value.status,
+    seed: value.seed,
+    startGeneration,
+    endGeneration,
+    generations: normalizedGenerations,
+    champion,
+    reason: value.reason,
+    startedAt: value.startedAt,
+    updatedAt: value.updatedAt,
+    finishedAt: value.finishedAt,
+  };
 
-  if (value.champion !== null) {
-    const championSpec = isRecord(value.champion) ? value.champion.spec : null;
-    if (!isCandidateSnapshot(value.champion) || !isRecord(championSpec)) return null;
-    if (
-      typeof championSpec.experimentId !== "string" ||
-      !isRecord(championSpec.protocol)
-    ) {
-      return null;
-    }
-  }
+  return {
+    schemaVersion: EVOLUTION_SESSION_SCHEMA_VERSION,
+    sessionId: value.sessionId,
+    projectId: value.projectId,
+    status: value.status,
+    seed: value.seed,
+    episodes: [episode],
+    generations: normalizedGenerations,
+    champion,
+    reason: value.reason,
+    startedAt: value.startedAt,
+    updatedAt: value.updatedAt,
+    finishedAt: value.finishedAt,
+  };
+};
 
-  return value as EvolutionSessionSnapshot;
+export function parseEvolutionSessionSnapshot(value: unknown): EvolutionSessionSnapshot | null {
+  if (!isRecord(value)) return null;
+  return value.schemaVersion === 1 ? migrateV1(value) : parseV2(value);
 }
 
 export function parseEvolutionSessionSnapshotContent(content: string) {
@@ -243,6 +387,7 @@ export function snapshotEvolutionAttempt(
     generation: attempt.candidate.generation,
     index: attempt.index,
     isWinner: attempt.candidate.key === winnerKey,
+    metadata: attempt.candidate.metadata ?? null,
     metrics: attempt.evaluation?.metrics ?? null,
     parentKey: attempt.candidate.parentKey,
     runId: attempt.execution?.run.runId ?? null,
