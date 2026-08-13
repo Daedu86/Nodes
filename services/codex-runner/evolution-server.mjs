@@ -5,6 +5,7 @@ import http from "node:http";
 import path from "node:path";
 
 import { readEvolutionRunnerConfig } from "./evolution-config.mjs";
+import { createDurableEvolutionOrchestrator } from "./evolution-orchestrator.mjs";
 import { readTychoReadiness } from "./tycho-readiness.mjs";
 import { normalizeWorkspaceFiles } from "./workspace-artifacts.mjs";
 import { createEvolutionWorkspace, cleanupEvolutionWorkspace } from "./evolution-workspace.mjs";
@@ -21,6 +22,11 @@ const MAX_CAPTURE_CHARS = 20_000;
 
 const runs = new Map();
 const active = new Set();
+const durable = createDurableEvolutionOrchestrator({
+  host: "127.0.0.1",
+  evolutionPort: PORT,
+  token: RUNNER_TOKEN,
+});
 
 const isRecord = (value) => value && typeof value === "object" && !Array.isArray(value);
 const asString = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
@@ -214,13 +220,51 @@ function startEvolutionRun(body, ownerId) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-  if (url.pathname === "/healthz") return json(res, 200, { ok: true, runs: runs.size, activeRuns: active.size, maxConcurrency: MAX_CONCURRENCY });
+  if (url.pathname === "/healthz") {
+    return json(res, 200, {
+      ok: true,
+      runs: runs.size,
+      activeRuns: active.size,
+      maxConcurrency: MAX_CONCURRENCY,
+      durableEpisodes: durable.activeCount(),
+    });
+  }
   if (!authorize(req)) return json(res, 401, { error: "Unauthorized." });
 
   try {
     if (url.pathname === "/readyz" && req.method === "GET") {
       const tycho = await readTychoReadiness();
-      return json(res, tycho.tychoReady ? 200 : 503, { ok: tycho.tychoReady === true, ...tycho, workspaceIds: [...WORKSPACES.keys()], maxConcurrency: MAX_CONCURRENCY });
+      return json(res, tycho.tychoReady ? 200 : 503, {
+        ok: tycho.tychoReady === true,
+        ...tycho,
+        workspaceIds: [...WORKSPACES.keys()],
+        maxConcurrency: MAX_CONCURRENCY,
+        durableEvolution: true,
+      });
+    }
+
+    if (url.pathname === "/v1/evolution/episodes" && req.method === "POST") {
+      const body = await readJson(req);
+      const ownerId = ownerFrom(req, body);
+      if (!ownerId) return json(res, 400, { error: "Missing owner id." });
+      const episode = await durable.start(body, ownerId);
+      return json(res, 202, episode);
+    }
+
+    const episodeCancelMatch = url.pathname.match(/^\/v1\/evolution\/episodes\/([^/]+)\/cancel$/);
+    if (episodeCancelMatch && req.method === "POST") {
+      const ownerId = ownerFrom(req);
+      const episode = await durable.cancel(decodeURIComponent(episodeCancelMatch[1]), ownerId);
+      if (!episode) return json(res, 404, { error: "Evolution episode run not found." });
+      return json(res, 200, episode);
+    }
+
+    const episodeMatch = url.pathname.match(/^\/v1\/evolution\/episodes\/([^/]+)$/);
+    if (episodeMatch && req.method === "GET") {
+      const ownerId = ownerFrom(req);
+      const episode = await durable.get(decodeURIComponent(episodeMatch[1]), ownerId);
+      if (!episode) return json(res, 404, { error: "Evolution episode run not found." });
+      return json(res, 200, episode);
     }
 
     if (url.pathname === "/v1/evolution/runs" && req.method === "POST") {
@@ -271,13 +315,18 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => console.log(`Nodes Tycho Evolution Runner listening on http://${HOST}:${PORT}`));
+server.listen(PORT, HOST, () => {
+  console.log(`Nodes Tycho Evolution Runner listening on http://${HOST}:${PORT}`);
+  void durable.recover();
+});
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
-    for (const run of runs.values()) {
-      run.child?.kill("SIGTERM");
-      cleanupEvolutionWorkspace(run.cwd);
-    }
-    server.close(() => process.exit(0));
+    void durable.shutdown().finally(() => {
+      for (const run of runs.values()) {
+        run.child?.kill("SIGTERM");
+        cleanupEvolutionWorkspace(run.cwd);
+      }
+      server.close(() => process.exit(0));
+    });
   });
 }
