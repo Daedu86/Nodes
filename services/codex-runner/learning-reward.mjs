@@ -27,21 +27,17 @@ function decisionCorrectness(decision) {
   return 0;
 }
 
-export function buildLearningReward(result, options = {}) {
-  if (!isRecord(result) || !isRecord(result.summary)) {
-    throw new Error("Learning reward requires Tycho summary evidence.");
-  }
-  const summary = result.summary;
-  const stepCount = Math.max(0, Number(summary.stepCount || 0));
-  const passedSteps = Math.max(0, Number(summary.passedSteps || 0));
-  const failedSteps = Math.max(0, Number(summary.failedSteps || 0));
-  const blockedSteps = Math.max(0, Number(summary.blockedSteps || 0));
-  const passRatio = stepCount > 0 ? clamp01(passedSteps / stepCount) : 0;
+function buildFromNormalizedEvidence(input, options = {}) {
+  const stepCount = Math.max(0, Number(input.stepCount || 0));
+  const passedSteps = Math.max(0, Number(input.passedSteps || 0));
+  const failedSteps = Math.max(0, Number(input.failedSteps || 0));
+  const blockedSteps = Math.max(0, Number(input.blockedSteps || 0));
+  const passRatio = Number.isFinite(input.passRatio) ? clamp01(input.passRatio) : (stepCount > 0 ? clamp01(passedSteps / stepCount) : 0);
   const reliability = stepCount > 0 ? clamp01(1 - ((failedSteps + blockedSteps) / stepCount)) : 0;
-  const wallSeconds = Math.max(0, Number(result.budget?.wallSeconds || 0));
+  const wallSeconds = Math.max(0, Number(input.wallSeconds || 0));
   const efficiencyHalfLifeSeconds = Math.max(1, Number(options.efficiencyHalfLifeSeconds || 30));
   const efficiency = clamp01(1 / (1 + (wallSeconds / efficiencyHalfLifeSeconds)));
-  const correctness = decisionCorrectness(result.decision);
+  const correctness = decisionCorrectness(input.decision);
   const weights = normalizeWeights(options.weights);
   const components = { correctness, passRatio, reliability, efficiency };
   const reward = clamp01(Object.entries(weights).reduce((sum, [key, weight]) => sum + (components[key] * weight), 0));
@@ -51,7 +47,7 @@ export function buildLearningReward(result, options = {}) {
     components,
     weights,
     evidence: {
-      decision: result.decision ?? null,
+      decision: input.decision ?? null,
       stepCount,
       passedSteps,
       failedSteps,
@@ -59,6 +55,36 @@ export function buildLearningReward(result, options = {}) {
       wallSeconds,
     },
   };
+}
+
+export function buildLearningReward(result, options = {}) {
+  if (!isRecord(result) || !isRecord(result.summary)) {
+    throw new Error("Learning reward requires Tycho summary evidence.");
+  }
+  return buildFromNormalizedEvidence({
+    decision: result.decision,
+    stepCount: result.summary.stepCount,
+    passedSteps: result.summary.passedSteps,
+    failedSteps: result.summary.failedSteps,
+    blockedSteps: result.summary.blockedSteps,
+    wallSeconds: result.budget?.wallSeconds,
+  }, options);
+}
+
+export function buildLearningRewardFromEvaluation(evaluation, options = {}) {
+  if (!isRecord(evaluation)) return buildFromNormalizedEvidence({}, options);
+  const metrics = isRecord(evaluation.metrics) ? evaluation.metrics : {};
+  const evidence = isRecord(evaluation.evidence) ? evaluation.evidence : {};
+  const summary = isRecord(evidence.summary) ? evidence.summary : {};
+  return buildFromNormalizedEvidence({
+    decision: evidence.decision,
+    stepCount: summary.stepCount,
+    passedSteps: metrics.passedSteps ?? summary.passedSteps,
+    failedSteps: metrics.failedSteps ?? summary.failedSteps,
+    blockedSteps: metrics.blockedSteps ?? summary.blockedSteps,
+    passRatio: metrics.passRatio,
+    wallSeconds: metrics.wallSeconds,
+  }, options);
 }
 
 export function aggregateGenerationReward(attempts) {
