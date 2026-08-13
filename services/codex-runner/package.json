@@ -7,10 +7,11 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "node --check server.mjs && node --check server-launcher.mjs && node --check tycho-readiness.mjs && node --check workspace-artifacts.mjs && node --check evolution-config.mjs && node --check evolution-result.mjs && node --check evolution-workspace.mjs && node --check codex-evolution-generator.mjs && node --check evolution-orchestrator.mjs && node --check evolution-server.mjs && node --check evolution-server-kubernetes.mjs && node --check kubernetes-evolution-backend.mjs && node --check durable-evolution-smoke.mjs && node --check kubernetes-evolution-smoke.mjs",
+    "check": "node --check server.mjs && node --check server-launcher.mjs && node --check tycho-readiness.mjs && node --check workspace-artifacts.mjs && node --check evolution-config.mjs && node --check evolution-result.mjs && node --check evolution-workspace.mjs && node --check codex-evolution-generator.mjs && node --check evolution-orchestrator.mjs && node --check evolution-server.mjs && node --check evolution-server-kubernetes.mjs && node --check kubernetes-evolution-backend.mjs && node --check kubernetes-workspace-sync.mjs && node --check durable-evolution-smoke.mjs && node --check kubernetes-evolution-smoke.mjs",
     "test": "node --test tycho-readiness.test.mjs workspace-artifacts.test.mjs evolution-config.test.mjs evolution-result.test.mjs evolution-workspace.test.mjs codex-evolution-generator.test.mjs evolution-orchestrator.test.mjs evolution-orchestrator-hardening.test.mjs kubernetes-evolution-backend.test.mjs",
     "smoke:durable": "node durable-evolution-smoke.mjs",
     "smoke:kubernetes": "node kubernetes-evolution-smoke.mjs",
+    "sync:kubernetes": "node kubernetes-workspace-sync.mjs",
     "start": "node server-launcher.mjs",
     "start:env": "node --env-file=.env server-launcher.mjs",
     "dev": "node --watch server-launcher.mjs",
