@@ -293,7 +293,7 @@ export function createRunnerCodexVariantGenerator(options = {}) {
     const started = await startResponse.json();
     const runId = asString(started.runId);
     if (!runId) throw new Error("Codex variant generator returned an invalid run id.");
-    input.onRunStarted?.(runId);
+    await input.onRunStarted?.(runId);
     try {
       const streamResponse = await fetch(`${baseUrl}/v1/runs/${encodeURIComponent(runId)}/events`, {
         method: "GET",
@@ -314,7 +314,7 @@ export function createRunnerCodexVariantGenerator(options = {}) {
       await cancel(input.ownerId, runId);
       throw error;
     } finally {
-      input.onRunFinished?.(runId);
+      await input.onRunFinished?.(runId);
     }
   };
 }
