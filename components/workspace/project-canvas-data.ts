@@ -2,6 +2,7 @@
 
 import type { ProjectMemoryItem } from "@/lib/memory-documents";
 import type { ProjectDocument } from "@/lib/project-documents";
+import { PROJECT_MEMORY_META } from "@/lib/project-memory-meta";
 import { buildLegacyProjectMap, normalizeProjectMap } from "@/lib/project-map";
 import type { SessionDocument } from "@/lib/session-documents";
 import { getSessionTreeStats } from "@/lib/session-context";
@@ -48,6 +49,9 @@ const formatSessionTitle = (title: string | null) => title?.trim() || "Untitled 
 const makeWorkloadNodeId = (projectId: string, mapNodeId: string) =>
   `project:${projectId}:workload:${mapNodeId}`;
 
+const makeMemoryNodeId = (projectId: string, memoryId: string) =>
+  `project:${projectId}:memory:${memoryId}`;
+
 const summarizeNodeSessions = (sessions: SessionDocument[]) => {
   if (sessions.length === 0) return "No sessions yet";
   const messageCount = sessions.reduce(
@@ -67,7 +71,6 @@ export function buildProjectCanvasFlow(
   sessions: SessionDocument[],
   memoryItems: ProjectMemoryItem[] = [],
 ) {
-  void memoryItems;
   const nodes: ThreadGraphFlowNode[] = [];
   const edges: ThreadGraphFlowEdge[] = [];
   const sessionById = new Map(sessions.map((session) => [session.id, session] as const));
@@ -137,6 +140,35 @@ export function buildProjectCanvasFlow(
     });
   });
 
+  const attachedMemoryIds = new Set(project.memoryIds);
+  const attachedMemoryItems = memoryItems.filter((item) => attachedMemoryIds.has(item.id));
+  attachedMemoryItems.forEach((item, index) => {
+    const meta = PROJECT_MEMORY_META[item.type];
+    const sourceSession = item.sourceSessionId
+      ? sessionById.get(item.sourceSessionId) ?? null
+      : null;
+
+    nodes.push({
+      id: makeMemoryNodeId(project.id, item.id),
+      type: "artifactNode",
+      position: { x: 0, y: 0 },
+      data: {
+        accent: meta.accent,
+        idx: map.nodes.length + index,
+        kind: "artifact",
+        memoryId: item.id,
+        memoryType: item.type,
+        preview: item.content,
+        role: "memory",
+        sessionId: item.sourceSessionId,
+        sessionIds: item.sourceSessionId ? [item.sourceSessionId] : [],
+        sessionTitle: sourceSession ? formatSessionTitle(sourceSession.title) : null,
+        statusLabel: meta.label,
+        title: item.title,
+      },
+    });
+  });
+
   map.edges.forEach((mapEdge) => {
     const sourceNode = map.nodes.find((node) => node.id === mapEdge.sourceNodeId);
     if (!sourceNode) return;
@@ -151,6 +183,25 @@ export function buildProjectCanvasFlow(
           ?? (sourceNode.selectedOutput ? "#16a34a" : "#64748b"),
         label: mapEdge.label ?? (sourceNode.selectedOutput ? "output" : "depends on"),
         tone: "default",
+      },
+    });
+  });
+
+  attachedMemoryItems.forEach((item) => {
+    if (!item.sourceSessionId) return;
+    const sourceNode = map.nodes.find((node) =>
+      node.sessionIds.includes(item.sourceSessionId!),
+    );
+    if (!sourceNode) return;
+    edges.push({
+      id: `project:${project.id}:memory-edge:${item.id}`,
+      source: makeWorkloadNodeId(project.id, sourceNode.id),
+      target: makeMemoryNodeId(project.id, item.id),
+      type: "threadEdge",
+      data: {
+        accent: PROJECT_MEMORY_META[item.type].accent,
+        label: PROJECT_MEMORY_META[item.type].label,
+        tone: "context",
       },
     });
   });
