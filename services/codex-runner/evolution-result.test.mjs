@@ -21,15 +21,18 @@ const validResult = () => ({
   steps: [{ id: "verify" }],
 });
 
-test("accepts a valid isolated Tycho evolution result", () => {
+test("accepts valid Docker and Kubernetes isolated Tycho evolution results", () => {
   assert.equal(parseTychoEvolutionResult(validResult(), "candidate-1").decision, "promote");
+  const kubernetes = validResult();
+  kubernetes.sandbox = { runtime: "kubernetes", image: "tycho:kubernetes" };
+  assert.equal(parseTychoEvolutionResult(kubernetes, "candidate-1").sandbox.runtime, "kubernetes");
 });
 
-test("rejects result identity and sandbox mismatches", () => {
+test("rejects result identity and non-isolated host sandbox", () => {
   assert.throws(() => parseTychoEvolutionResult(validResult(), "candidate-2"), /experimentId mismatch/);
   const host = validResult();
   host.sandbox.runtime = "host";
-  assert.throws(() => parseTychoEvolutionResult(host, "candidate-1"), /Docker\/Finch/);
+  assert.throws(() => parseTychoEvolutionResult(host, "candidate-1"), /isolated runtime/);
 });
 
 test("reads only the fixed .nodes result path", () => {
