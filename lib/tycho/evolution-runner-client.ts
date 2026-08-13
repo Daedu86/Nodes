@@ -1,4 +1,10 @@
 import type { CodexWorkspaceFile } from "@/lib/agents/codex/types";
+import type { EvolutionEvaluation, EvolutionResumePoint, TychoVariant } from "@/lib/tycho-evolution-loop";
+import type { TychoEvolutionSpec } from "@/lib/tycho/evolution-backend";
+import type {
+  EvolutionChampionSnapshot,
+  EvolutionGenerationSnapshot,
+} from "@/lib/tycho/evolution-session-snapshot";
 
 export type TychoEvolutionDecision = "promote" | "reject" | "blocked";
 export type TychoEvolutionRunStatus = "running" | "completed" | "failed" | "cancelled";
@@ -52,6 +58,59 @@ export type StartTychoEvolutionRunInput = {
   candidateKey: string;
   experimentId: string;
   workspaceFiles: CodexWorkspaceFile[];
+};
+
+export type DurableEvolutionRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type DurableEvolutionRunPhase =
+  | "queued"
+  | "recovering"
+  | "generating"
+  | "executing_generation"
+  | "checkpointed"
+  | "cancelling"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type DurableEvolutionRunSnapshot = {
+  schemaVersion: 1;
+  runId: string;
+  sessionId: string;
+  projectId: string | null;
+  workspaceId: string;
+  episodeIndex: number;
+  status: DurableEvolutionRunStatus;
+  phase: DurableEvolutionRunPhase;
+  requestedGenerations: number;
+  populationSize: number;
+  startGeneration: number;
+  nextGeneration: number;
+  completedGenerations: number;
+  generations: EvolutionGenerationSnapshot[];
+  champion: EvolutionChampionSnapshot | null;
+  reason: string | null;
+  activeGeneratorRunId: string | null;
+  activeCandidateRunIds: string[];
+  cancelRequested: boolean;
+  createdAt: string;
+  startedAt: string | null;
+  updatedAt: string;
+  finishedAt: string | null;
+};
+
+export type StartDurableEvolutionRunInput = {
+  ownerId: string;
+  sessionId: string;
+  projectId?: string | null;
+  workspaceId: string;
+  episodeIndex: number;
+  generations: number;
+  populationSize: number;
+  candidateTimeoutMs?: number;
+  generatorTimeoutMs?: number;
+  pollIntervalMs?: number;
+  seed: TychoVariant<TychoEvolutionSpec>;
+  resumeFrom?: EvolutionResumePoint<TychoEvolutionSpec>;
 };
 
 const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, "");
@@ -138,3 +197,37 @@ export async function cancelTychoEvolutionRun(ownerId: string, runId: string) {
   if (!response.ok) throw new Error(await readError(response));
   return (await response.json()) as TychoEvolutionRunSnapshot;
 }
+
+export async function startDurableEvolutionRun(
+  input: StartDurableEvolutionRunInput,
+): Promise<DurableEvolutionRunSnapshot> {
+  const response = await runnerFetch(input.ownerId, "/v1/evolution/episodes", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return (await response.json()) as DurableEvolutionRunSnapshot;
+}
+
+export async function getDurableEvolutionRun(ownerId: string, runId: string) {
+  const response = await runnerFetch(
+    ownerId,
+    `/v1/evolution/episodes/${encodeURIComponent(runId)}`,
+    { method: "GET" },
+  );
+  if (!response.ok) throw new Error(await readError(response));
+  return (await response.json()) as DurableEvolutionRunSnapshot;
+}
+
+export async function cancelDurableEvolutionRun(ownerId: string, runId: string) {
+  const response = await runnerFetch(
+    ownerId,
+    `/v1/evolution/episodes/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST" },
+  );
+  if (!response.ok) throw new Error(await readError(response));
+  return (await response.json()) as DurableEvolutionRunSnapshot;
+}
+
+export type { EvolutionEvaluation };
