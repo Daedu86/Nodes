@@ -13,7 +13,7 @@ import { materializeWorkspaceFiles, normalizeWorkspaceFiles } from "./workspace-
 
 const DEFAULT_MAX_FILES = 20_000;
 const DEFAULT_MAX_BYTES = 256 * 1024 * 1024;
-const EXCLUDED_TOP_LEVEL = new Set([
+const EXCLUDED_SEGMENTS = new Set([
   ".git",
   ".next",
   ".venv",
@@ -24,6 +24,7 @@ const EXCLUDED_TOP_LEVEL = new Set([
   "playwright-report",
   "test-results",
   "venv",
+  "__pycache__",
 ]);
 
 const normalizeSlash = (value) => value.split(path.sep).join("/");
@@ -31,12 +32,20 @@ const safeRunId = (value) => /^[A-Za-z0-9-]+$/.test(value);
 
 function shouldSkip(relativePath, stat, overriddenPaths) {
   const normalized = normalizeSlash(relativePath);
-  const topLevel = normalized.split("/")[0];
-  if (EXCLUDED_TOP_LEVEL.has(topLevel)) return true;
+  const segments = normalized.split("/");
+  if (segments.some((segment) => EXCLUDED_SEGMENTS.has(segment))) return true;
   if (normalized === ".nodes/tycho-result.json") return true;
   if (overriddenPaths.has(normalized)) return true;
   if (stat.isSymbolicLink()) return true;
   return false;
+}
+
+function assertTempRootOutsideSource(source, tempRoot) {
+  const relative = path.relative(source, tempRoot);
+  const insideSource = relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+  if (insideSource) {
+    throw new Error("TYCHO_EVOLUTION_TEMP_ROOT must be outside the configured source workspace.");
+  }
 }
 
 export function createEvolutionWorkspace(sourceCwd, runId, workspaceFiles, options = {}) {
@@ -56,6 +65,7 @@ export function createEvolutionWorkspace(sourceCwd, runId, workspaceFiles, optio
   const tempRoot = path.resolve(
     options.tempRoot || process.env.TYCHO_EVOLUTION_TEMP_ROOT || path.join(os.tmpdir(), "nodes-tycho-evolution"),
   );
+  assertTempRootOutsideSource(source, tempRoot);
   mkdirSync(tempRoot, { recursive: true, mode: 0o700 });
   const destination = path.join(tempRoot, runId);
   if (existsSync(destination)) throw new Error("Evolution run workspace already exists.");
@@ -63,6 +73,9 @@ export function createEvolutionWorkspace(sourceCwd, runId, workspaceFiles, optio
 
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES;
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+  if (!Number.isInteger(maxFiles) || maxFiles <= 0) throw new Error("Evolution workspace maxFiles must be a positive integer.");
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0) throw new Error("Evolution workspace maxBytes must be positive.");
+
   let copiedFiles = 0;
   let copiedBytes = 0;
 
