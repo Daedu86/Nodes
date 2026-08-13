@@ -1,0 +1,165 @@
+name: M2 Kubernetes Validation
+
+on:
+  push:
+    branches: [feature/tycho-kagent-kubernetes-backend]
+
+permissions:
+  contents: read
+
+env:
+  CI: "true"
+  NEXT_TELEMETRY_DISABLED: "1"
+  VERCEL_ENV: preview
+  NODES_PERSISTENCE_BACKEND: file
+  AUTH_ENABLE_DEV_CREDENTIALS: "0"
+  OPENROUTER_ALLOW_DEPLOYMENT_KEY: "0"
+  OPENROUTER_REQUIRE_USER_KEY: "1"
+
+jobs:
+  nodes-m2:
+    name: Nodes M2 contracts and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Nodes
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --fund=false
+      - name: Lint
+        run: npm run format:check
+      - name: Runner syntax
+        run: npm --prefix services/codex-runner run check
+      - name: Runner tests
+        run: npm --prefix services/codex-runner test
+      - name: TypeScript
+        run: npm run typecheck
+      - name: Evolution regressions
+        run: npm test -- tests/durable-evolution-snapshot.test.ts tests/tycho-evolution-loop.test.ts tests/tycho-evolution-loop-budget.test.ts tests/tycho-evolution-session.test.ts tests/codex-evolution-variant-generator.test.ts
+      - name: Production build
+        run: npm run build
+
+  kind-m2:
+    name: Kind Tycho Job and kagent CRD integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout Nodes
+        uses: actions/checkout@v4
+      - name: Checkout Tycho Kubernetes branch
+        uses: actions/checkout@v4
+        with:
+          repository: Daedu86/Tycho-Llm-Luna
+          ref: feature/tycho-kubernetes-sandbox
+          path: tycho-src
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Install Kind 0.32.0
+        run: |
+          go install sigs.k8s.io/kind@v0.32.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Create Kind cluster
+        run: |
+          "$(go env GOPATH)/bin/kind" create cluster --name nodes-m2 --wait 120s
+          kubectl cluster-info --context kind-nodes-m2
+      - name: Build and load Tycho Kubernetes image
+        run: |
+          docker build -f tycho-src/deploy/kubernetes/Containerfile -t tycho-kubernetes:m2 tycho-src
+          kind load docker-image tycho-kubernetes:m2 --name nodes-m2
+      - name: Install Nodes Kubernetes policy
+        run: kubectl --context kind-nodes-m2 apply -f deploy/kubernetes/nodes-evolution-base.yaml
+      - name: Create writable integration source PVC
+        run: |
+          docker exec nodes-m2-control-plane sh -c 'mkdir -p /var/nodes-m2-workspace && chmod 0777 /var/nodes-m2-workspace'
+          kubectl --context kind-nodes-m2 apply -f - <<'EOF'
+          apiVersion: v1
+          kind: PersistentVolume
+          metadata:
+            name: nodes-m2-workspace-pv
+          spec:
+            capacity:
+              storage: 1Gi
+            accessModes:
+              - ReadWriteOnce
+            persistentVolumeReclaimPolicy: Retain
+            storageClassName: manual
+            hostPath:
+              path: /var/nodes-m2-workspace
+              type: DirectoryOrCreate
+          ---
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: nodes-m2-workspace
+            namespace: nodes-evolution
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 1Gi
+            storageClassName: manual
+            volumeName: nodes-m2-workspace-pv
+          EOF
+          kubectl --context kind-nodes-m2 -n nodes-evolution wait pvc/nodes-m2-workspace --for=jsonpath='{.status.phase}'=Bound --timeout=60s
+      - name: Install kagent CRDs 0.9.12
+        run: |
+          helm upgrade --install kagent-crds oci://ghcr.io/kagent-dev/kagent/helm/kagent-crds \
+            --version 0.9.12 \
+            --namespace kagent \
+            --create-namespace \
+            --set kmcp.enabled=false \
+            --wait --timeout 5m
+          kubectl --context kind-nodes-m2 get crd agents.kagent.dev
+      - name: Validate and deploy Nodes kagent observer
+        run: |
+          kubectl --context kind-nodes-m2 apply -f deploy/kagent/nodes-evolution-observer.yaml
+          kubectl --context kind-nodes-m2 -n kagent get agent.kagent.dev/nodes-evolution-observer -o yaml
+      - name: Sync allowlisted local workspace into PVC
+        env:
+          TYCHO_KUBERNETES_CONTEXT: kind-nodes-m2
+          TYCHO_KUBERNETES_NAMESPACE: nodes-evolution
+          TYCHO_KUBERNETES_IMAGE: tycho-kubernetes:m2
+          TYCHO_KUBERNETES_IMAGE_PULL_POLICY: IfNotPresent
+          TYCHO_KUBERNETES_WORKSPACES_JSON: '{"m2-integration":{"persistentVolumeClaim":"nodes-m2-workspace"}}'
+        run: |
+          mkdir -p .m2-sync-source
+          printf 'from-sync\n' > .m2-sync-source/m2-source-marker.txt
+          export CODEX_WORKSPACES_JSON="{\"m2-integration\":\"$PWD/.m2-sync-source\"}"
+          node services/codex-runner/kubernetes-workspace-sync.mjs m2-integration
+      - name: Verify kagent readiness contract
+        env:
+          TYCHO_KUBERNETES_CONTEXT: kind-nodes-m2
+          TYCHO_KAGENT_NAMESPACE: kagent
+          TYCHO_KAGENT_OBSERVER_NAME: nodes-evolution-observer
+        run: |
+          node --input-type=module - <<'EOF'
+          import { readKagentEvolutionReadiness } from './services/codex-runner/kagent-readiness.mjs';
+          const readiness = await readKagentEvolutionReadiness();
+          console.log(JSON.stringify(readiness, null, 2));
+          if (!readiness.kagentReady) process.exit(1);
+          EOF
+      - name: Execute a real Tycho Kubernetes candidate
+        env:
+          TYCHO_KUBERNETES_CONTEXT: kind-nodes-m2
+          TYCHO_KUBERNETES_NAMESPACE: nodes-evolution
+          TYCHO_KUBERNETES_IMAGE: tycho-kubernetes:m2
+          TYCHO_KUBERNETES_IMAGE_PULL_POLICY: IfNotPresent
+          TYCHO_KUBERNETES_WORKSPACES_JSON: '{"m2-integration":{"persistentVolumeClaim":"nodes-m2-workspace"}}'
+          NODES_KUBERNETES_INTEGRATION_WORKSPACE_ID: m2-integration
+          NODES_KUBERNETES_INTEGRATION_SOURCE_MARKER: from-sync
+        run: node services/codex-runner/kubernetes-candidate-integration.mjs
+      - name: Show cluster diagnostics on failure
+        if: failure()
+        run: |
+          kubectl --context kind-nodes-m2 get all -A || true
+          kubectl --context kind-nodes-m2 get jobs,pods,configmaps -n nodes-evolution -o wide || true
+          kubectl --context kind-nodes-m2 get events -n nodes-evolution --sort-by=.lastTimestamp || true
+          kubectl --context kind-nodes-m2 logs -n nodes-evolution -l app.kubernetes.io/name=nodes-tycho-evolution --all-containers=true --tail=200 || true
