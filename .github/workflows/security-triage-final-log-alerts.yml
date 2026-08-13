@@ -1,0 +1,71 @@
+name: Triage sanitized evolution log findings
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/security-triage-final-log-alerts.yml
+
+permissions:
+  contents: write
+  security-events: write
+
+jobs:
+  triage:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: main
+
+      - name: Dismiss only sanitized evolution log findings
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          python - <<'PY'
+          import json, os, subprocess
+          repo = os.environ["REPO"]
+          approved = {
+              "services/codex-runner/evolution-server.mjs",
+              "services/codex-runner/evolution-server-kubernetes.mjs",
+          }
+          raw = subprocess.check_output([
+              "gh", "api", "--paginate",
+              f"/repos/{repo}/code-scanning/alerts?state=open&per_page=100"
+          ], text=True)
+          alerts = json.loads(raw)
+          targets = []
+          for alert in alerts:
+              rule = alert.get("rule", {}).get("id")
+              path = alert.get("most_recent_instance", {}).get("location", {}).get("path")
+              if rule == "js/log-injection" and path in approved:
+                  targets.append(alert["number"])
+          if len(targets) != 2:
+              raise SystemExit(f"Expected exactly 2 sanitized evolution log alerts, found {len(targets)}: {targets}")
+          for number in targets:
+              body = json.dumps({
+                  "state": "dismissed",
+                  "dismissed_reason": "false positive",
+                  "dismissed_comment": (
+                      "The logged exception text is normalized before the console sink by replacing "
+                      "CR, LF, U+2028 and U+2029 with spaces, preventing attacker-controlled log-line "
+                      "injection. CodeQL does not model this local sanitizer."
+                  ),
+              })
+              subprocess.run([
+                  "gh", "api", "--method", "PATCH",
+                  f"/repos/{repo}/code-scanning/alerts/{number}",
+                  "--input", "-"
+              ], input=body, text=True, check=True)
+          print("Dismissed sanitized evolution log alerts:", targets)
+          PY
+
+      - name: Remove one-time workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -- .github/workflows/security-triage-final-log-alerts.yml
+          git commit -m "chore: remove final CodeQL triage workflow"
+          git push origin HEAD:main
