@@ -75,4 +75,4 @@ jobs:
           git commit -m "chore: capture final CodeQL verification [skip vercel]"
           git push origin HEAD:main
 
-# Triggered after runner security fixes on 2026-08-13.
+# Final zero-alert verification after runner security hardening on 2026-08-13.
