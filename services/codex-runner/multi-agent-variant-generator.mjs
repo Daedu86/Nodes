@@ -97,12 +97,23 @@ export function createMultiAgentVariantGenerator(options = {}) {
 
   async function runAgent(input, profile, count, wave, teamContext, agentRuns) {
     if (count <= 0) return [];
-    const generated = await baseGenerator({
-      ...input,
-      count,
-      agentProfile: profile,
-      teamContext,
-    });
+    const currentEvaluation = isRecord(input.parentEvaluation) ? input.parentEvaluation : { score: 0, metrics: {}, evidence: {} };
+    const currentEvidence = isRecord(currentEvaluation.evidence) ? currentEvaluation.evidence : {};
+    const parentEvaluation = {
+      ...currentEvaluation,
+      evidence: {
+        ...currentEvidence,
+        multiAgentAgent: {
+          profileId: profile.id,
+          role: profile.role,
+          label: profile.label,
+          directive: profile.directive,
+          wave,
+        },
+        multiAgentTeamContext: teamContext,
+      },
+    };
+    const generated = await baseGenerator({ ...input, count, parentEvaluation });
     const runId = generated.generatorRunId ?? null;
     agentRuns.push({ profileId: profile.id, role: profile.role, label: profile.label, wave, count, runId });
     return generated.variants.map((variant, index) => namespaceVariant(profile, variant, index, {
@@ -122,8 +133,8 @@ export function createMultiAgentVariantGenerator(options = {}) {
       const profiles = [AGENT_PROFILES.failureAnalyst, AGENT_PROFILES.mechanismExplorer, AGENT_PROFILES.falsifier];
       const allocation = quotas(input.count, profiles.length);
       const variants = [];
-      // Deliberately serialized at the trusted Codex boundary so cancellation can
-      // remain exact with the M1 single-active-generator lifecycle contract.
+      // Logical parallelism with independent agents; calls are serialized at the
+      // trusted Codex boundary so M1 cancellation remains exact for one active run.
       for (let index = 0; index < profiles.length; index += 1) {
         variants.push(...await runAgent(input, profiles[index], allocation[index], 1, {
           topology: topologyId,
