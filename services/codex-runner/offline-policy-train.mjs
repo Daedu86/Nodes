@@ -1,3 +1,4 @@
+import { createCurriculumController } from "./curriculum-controller.mjs";
 import { createPolicyController } from "./policy-controller.mjs";
 import { createTeamPolicyController } from "./team-policy-controller.mjs";
 import { createTrajectoryStore } from "./trajectory-store.mjs";
@@ -13,6 +14,7 @@ const store = createTrajectoryStore();
 const policy = createPolicyController({ mode: "online" });
 const teamPolicy = createTeamPolicyController({ mode: "online" });
 const skills = createSkillRegistry();
+const curriculum = createCurriculumController({ mode: "observe" });
 const trajectories = await store.list(workspaceId ? { workspaceId } : {});
 const [strategy, team] = await Promise.all([
   policy.trainOffline(trajectories, { reset }),
@@ -20,6 +22,8 @@ const [strategy, team] = await Promise.all([
 ]);
 const mined = await mineAndRegisterSkills({ trajectoryStore: store, skillRegistry: skills, workspaceId });
 const validation = await validateRegisteredSkills({ trajectoryStore: store, skillRegistry: skills, workspaceId });
+const skillList = await skills.list();
+const curriculumReport = await curriculum.analyze({ trajectories, skills: skillList });
 const stats = await store.stats(workspaceId ? { workspaceId } : {});
 
 console.log(JSON.stringify({
@@ -34,5 +38,6 @@ console.log(JSON.stringify({
     validation,
     registry: await skills.stats(),
   },
+  curriculum: curriculumReport,
   replay: stats,
 }, null, 2));
