@@ -134,6 +134,65 @@ const sanitizeSnapshot = (value: unknown, sessionId: string): CodexCanvasSnapsho
   };
 };
 
+const recoverStartedRun = (
+  payloadValue: unknown,
+  index: number,
+): CodexPersistedRun | null => {
+  const payload = asRecord(payloadValue);
+  if (!payload) return null;
+  const runId = asNullableString(payload.runId, 200);
+  if (!runId) return null;
+  const role = ROLES.has(payload.role as CodexAgentRole)
+    ? (payload.role as CodexAgentRole)
+    : "coder";
+  const status = STATUSES.has(payload.status as CodexRunStatus)
+    ? (payload.status as CodexRunStatus)
+    : "running";
+  return {
+    localId: `codex-agent-${runId}`,
+    runId,
+    threadId: asNullableString(payload.threadId, 500),
+    agentId: asNullableString(payload.agentId, 500),
+    parentLocalId: null,
+    parentRunId: asNullableString(payload.parentRunId, 200),
+    role,
+    label: asNullableString(payload.label, 200) ?? "Recovered Codex run",
+    prompt: asString(payload.prompt),
+    output: "",
+    status,
+    events: [],
+    pendingApprovalId: null,
+    error: null,
+    position: {
+      x: 220 + (index % 3) * 420,
+      y: 180 + Math.floor(index / 3) * 320,
+    },
+  };
+};
+
+const mergeRecoveredRuns = (
+  snapshot: CodexCanvasSnapshot,
+  startedPayloads: unknown[],
+): CodexCanvasSnapshot => {
+  const merged = [...snapshot.runs];
+  const seen = new Set(
+    merged.map((run) => run.runId).filter((runId): runId is string => Boolean(runId)),
+  );
+
+  startedPayloads.forEach((payload, index) => {
+    const recovered = recoverStartedRun(payload, merged.length + index);
+    if (!recovered?.runId || seen.has(recovered.runId)) return;
+    seen.add(recovered.runId);
+    merged.push(recovered);
+  });
+
+  return {
+    ...snapshot,
+    runs: merged.slice(-MAX_RUNS),
+    updatedAt: new Date().toISOString(),
+  };
+};
+
 const requiredEvidenceMarker = (description: string) =>
   description.match(/\bmust\s+satisfy\s+([a-z0-9._-]+)/i)?.[1]?.trim() ?? null;
 
@@ -270,15 +329,25 @@ export async function GET(req: Request) {
   if (!session) return NextResponse.json({ error: "Session not found." }, { status: 404 });
 
   const repo = getAgentWorkRepository();
-  const events = await repo.listAgentEvents(guarded.user.id, {
-    sessionId,
-    eventType: "codex.canvas.snapshot",
-    limit: 1,
-  });
-  const snapshot = events[0]?.payload?.snapshot;
-  return NextResponse.json({
-    snapshot: sanitizeSnapshot(snapshot, sessionId),
-  });
+  const [snapshotEvents, startedEvents] = await Promise.all([
+    repo.listAgentEvents(guarded.user.id, {
+      sessionId,
+      eventType: "codex.canvas.snapshot",
+      limit: 1,
+    }),
+    repo.listAgentEvents(guarded.user.id, {
+      sessionId,
+      eventType: "codex.run.started",
+      limit: MAX_RUNS,
+    }),
+  ]);
+  const snapshot = sanitizeSnapshot(snapshotEvents[0]?.payload?.snapshot, sessionId);
+  const chronologicalStarted = [...startedEvents]
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    .map((event) => event.payload);
+  const recovered = mergeRecoveredRuns(snapshot, chronologicalStarted);
+
+  return NextResponse.json({ snapshot: recovered });
 }
 
 export async function POST(req: Request) {
