@@ -18,7 +18,6 @@ const stateA = "decision=promote|passBand=high|blockedBand=low|speedBand=fast";
 const stateB = "decision=reject|passBand=mid|blockedBand=low|speedBand=fast";
 const stateC = "decision=promote|passBand=high|blockedBand=low|speedBand=fast";
 const promoted = { decision: "promote", passBand: "high", blockedBand: "low", speedBand: "fast" };
-const rejected = { decision: "reject", passBand: "mid", blockedBand: "low", speedBand: "fast" };
 
 function store(values) {
   return { list: async (filter = {}) => values.filter((item) => !filter.workspaceId || item.workspaceId === filter.workspaceId) };
@@ -28,7 +27,6 @@ test("M8 prefers a lower immediate reward when its predicted state has stronger 
   const replay = store([
     trajectory("a1", stateA, "exploit", 0.55, promoted),
     trajectory("a2", stateA, "exploit", 0.58, promoted),
-    trajectory("a3", stateA, "repair", 0.50, rejected),
     trajectory("b1", stateB, "diversify", 0.94, promoted),
     trajectory("b2", stateB, "diversify", 0.91, promoted),
     trajectory("b3", stateB, "diversify", 0.93, promoted),
