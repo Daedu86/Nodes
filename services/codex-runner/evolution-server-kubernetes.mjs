@@ -2,6 +2,7 @@ import http from "node:http";
 
 import { readEvolutionRunnerConfig } from "./evolution-config.mjs";
 import { createDurableEvolutionOrchestrator } from "./evolution-orchestrator.mjs";
+import { readKagentEvolutionReadiness } from "./kagent-readiness.mjs";
 import { createKubernetesEvolutionBackend } from "./kubernetes-evolution-backend.mjs";
 
 const RUNNER_CONFIG = readEvolutionRunnerConfig();
@@ -62,9 +63,15 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (url.pathname === "/readyz" && req.method === "GET") {
-      const readiness = await backend.ready();
-      return json(res, readiness.ok ? 200 : 503, {
+      const [readiness, kagent] = await Promise.all([
+        backend.ready(),
+        readKagentEvolutionReadiness(),
+      ]);
+      const ok = readiness.ok === true && kagent.kagentReady === true;
+      return json(res, ok ? 200 : 503, {
         ...readiness,
+        ...kagent,
+        ok,
         durableEvolution: true,
         executionBackend: "kubernetes",
       });
