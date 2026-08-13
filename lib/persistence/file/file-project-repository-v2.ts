@@ -142,6 +142,7 @@ const getStored = async (projectId: string, ownerId?: string) => {
 };
 
 const actorRole = (project: StoredProject, actor: ProjectActor) => {
+  if (!project.ownerId && actor.claimLegacyOwnership === false) return "owner" as const;
   if (project.ownerId === actor.userId) return "owner" as const;
   const email = normalizeEmail(actor.userEmail);
   const member = project.members.find(
@@ -189,7 +190,9 @@ export const fileProjectRepositoryV2: ProjectRepository = {
   async listProjectsForActor(actor) {
     const visible: ProjectSummary[] = [];
     for (const project of await readAll()) {
-      const claimed = await claimOwner(project, actor.userId);
+      const claimed = actor.claimLegacyOwnership === false
+        ? null
+        : await claimOwner(project, actor.userId);
       const current = claimed ?? project;
       const role = actorRole(current, actor);
       if (role) visible.push(summary(current, role));
@@ -203,10 +206,15 @@ export const fileProjectRepositoryV2: ProjectRepository = {
 
   async getProjectRecordForActor(projectId, actor) {
     const project = await readProject(projectPath(projectId));
-    const claimed = await claimOwner(project, actor.userId);
+    const claimed = actor.claimLegacyOwnership === false
+      ? null
+      : await claimOwner(project, actor.userId);
     const current = claimed ?? project;
     const role = actorRole(current, actor);
     if (!role) throw new Error("Project not found");
+    if (!current.ownerId && actor.claimLegacyOwnership === false) {
+      return { ...toDocument(current, role), ownerId: actor.userId };
+    }
     return toRecord(current, role);
   },
 

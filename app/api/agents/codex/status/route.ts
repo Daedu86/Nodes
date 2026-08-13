@@ -1,89 +1,39 @@
 import { NextResponse } from "next/server";
-import { getCodexRunnerReadiness } from "@/lib/agents/codex/runner-client";
+import {
+  getCodexProjectRunnerStatus,
+  type CodexRunnerNextStep,
+} from "@/lib/agents/codex/runner-status";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type NextStep = {
-  code:
-    | "ready"
-    | "configure_runner"
-    | "start_runner"
-    | "update_runner"
-    | "authenticate"
-    | "configure_workspace"
-    | "configure_tycho";
+type RunnerNextStep = CodexRunnerNextStep | {
+  code: "configure_tycho";
   title: string;
   detail: string;
   command?: string;
 };
 
-const nextStepFor = (
-  status: {
-    codexRunning: boolean;
-    authenticated: boolean;
-    workspaceCount: number;
-    workspaceIdsSupported: boolean;
-    hasDefaultWorkspace: boolean;
-    tychoReady: boolean;
-    tychoStatus: string | null;
-  },
-  workspaceId: string | null,
-  workspaceConfigured: boolean,
-): NextStep => {
-  if (!status.codexRunning) {
+const nextStepWithTycho = (
+  status: Awaited<ReturnType<typeof getCodexProjectRunnerStatus>>,
+): RunnerNextStep => {
+  if (status.nextStep.code !== "ready") return status.nextStep;
+  if (status.tycho.ready === true) {
     return {
-      code: "start_runner",
-      title: "Start the local Codex Runner",
-      detail: "Nodes can reach the runner configuration, but the Codex app-server is not ready yet.",
+      code: "ready",
+      title: "Runner ready",
+      detail: "Codex, exact project workspace mapping, and the Tycho isolated runtime are ready for the selected workload.",
     };
   }
-  if (!status.authenticated) {
-    return {
-      code: "authenticate",
-      title: "Authenticate Codex on the runner machine",
-      detail: "Authentication remains local to Codex. Nodes never stores your Codex or ChatGPT credentials.",
-      command: "codex login",
-    };
-  }
-  if (workspaceId && !status.workspaceIdsSupported) {
-    return {
-      code: "update_runner",
-      title: "Update the local Codex Runner",
-      detail: "The connected runner predates exact project-workspace verification. Pull the latest Nodes-AI-Canvas on the runner machine and restart the runner, then use Check again.",
-    };
-  }
-  if (workspaceId && !workspaceConfigured) {
-    return {
-      code: "configure_workspace",
-      title: "Map this project to a runner workspace",
-      detail: `Add this project id to CODEX_WORKSPACES_JSON on the runner: ${workspaceId}`,
-    };
-  }
-  if (!workspaceId && !status.hasDefaultWorkspace && status.workspaceCount === 0) {
-    return {
-      code: "configure_workspace",
-      title: "Configure an execution workspace",
-      detail: "Set CODEX_DEFAULT_CWD or CODEX_WORKSPACES_JSON on the local runner, then restart it.",
-    };
-  }
-  if (!status.tychoReady) {
-    const detail =
-      status.tychoStatus === "not_installed"
-        ? "Install the matching Tycho feature branch on the runner machine, build the sandbox image, then run the doctor check."
-        : "Tycho must pass its isolated Docker/Finch doctor check before this branch can start a Tycho workload.";
-    return {
-      code: "configure_tycho",
-      title: "Prepare the Tycho isolated runtime",
-      detail,
-      command: "tycho-experiment --doctor",
-    };
-  }
+
   return {
-    code: "ready",
-    title: "Runner ready",
-    detail: "Codex, exact project workspace mapping, and the Tycho isolated runtime are ready for the selected workload.",
+    code: "configure_tycho",
+    title: "Prepare the Tycho isolated runtime",
+    detail:
+      status.tycho.reason ??
+      "Tycho must report an isolated runtime as ready before this workload can run.",
+    command: "tycho-experiment --doctor",
   };
 };
 
@@ -94,59 +44,26 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const workspaceId = url.searchParams.get("workspaceId")?.trim() || null;
 
-  try {
-    const readiness = await getCodexRunnerReadiness(guarded.user.id);
-    const workspaceConfigured = workspaceId
-      ? readiness.workspaceIdsSupported && readiness.workspaceIds.includes(workspaceId)
-      : readiness.hasDefaultWorkspace || readiness.workspaceCount > 0;
-    const safeReadiness = {
-      reachable: readiness.reachable,
-      ok: readiness.ok,
-      codexRunning: readiness.codexRunning,
-      authenticated: readiness.authenticated,
-      model: readiness.model,
-      workspaceCount: readiness.workspaceCount,
-      hasDefaultWorkspace: readiness.hasDefaultWorkspace,
-      tychoReady: readiness.tychoReady,
-      tychoRuntime: readiness.tychoRuntime,
-      tychoImage: readiness.tychoImage,
-      tychoStatus: readiness.tychoStatus,
-    };
+  const status = await getCodexProjectRunnerStatus({
+    ownerId: guarded.user.id,
+    workspaceId,
+  });
 
-    return NextResponse.json({
-      configured: true,
-      ...safeReadiness,
-      workspaceConfigured,
-      nextStep: nextStepFor(readiness, workspaceId, workspaceConfigured),
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to reach the Codex runner.";
-    const missingConfiguration = message.includes("CODEX_RUNNER_URL");
-    return NextResponse.json({
-      configured: !missingConfiguration,
-      reachable: false,
-      ok: false,
-      codexRunning: false,
-      authenticated: false,
-      model: null,
-      workspaceCount: 0,
-      hasDefaultWorkspace: false,
-      workspaceConfigured: false,
-      tychoReady: false,
-      tychoRuntime: null,
-      tychoImage: null,
-      tychoStatus: null,
-      nextStep: missingConfiguration
-        ? {
-            code: "configure_runner",
-            title: "Connect Nodes to the local runner",
-            detail: "Set CODEX_RUNNER_URL on the Nodes server. Keep the runner bound to a trusted/local network and use CODEX_RUNNER_TOKEN when it is not loopback-only.",
-          }
-        : {
-            code: "start_runner",
-            title: "Start or reconnect the local Codex Runner",
-            detail: "Nodes could not reach the configured runner. Start it and use Check again.",
-          },
-    });
-  }
+  return NextResponse.json({
+    authenticated: status.authenticated,
+    codexRunning: status.codexRunning,
+    configured: status.configured,
+    hasDefaultWorkspace: status.hasDefaultWorkspace,
+    model: status.model,
+    nextStep: nextStepWithTycho(status),
+    ok: status.ok,
+    reachable: status.reachable,
+    tycho: status.tycho,
+    tychoReady: status.tycho.ready === true,
+    tychoRuntime: status.tycho.runtime,
+    tychoImage: status.tycho.image,
+    tychoStatus: status.tycho.reason ?? status.tycho.decision,
+    workspaceConfigured: status.workspaceConfigured,
+    workspaceCount: status.workspaceCount,
+  });
 }

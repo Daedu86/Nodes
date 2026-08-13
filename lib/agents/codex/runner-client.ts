@@ -68,10 +68,19 @@ export type CodexRunnerReadiness = {
   workspaceIds: string[];
   workspaceIdsSupported: boolean;
   hasDefaultWorkspace: boolean;
-  tychoReady: boolean;
-  tychoRuntime: string | null;
-  tychoImage: string | null;
-  tychoStatus: string | null;
+  tycho: CodexRunnerTychoReadiness;
+};
+
+export type CodexRunnerTychoReadiness = {
+  decision: string | null;
+  filesystemExperimentPresent: boolean | null;
+  filesystemProtocolPresent: boolean | null;
+  filesystemResultPresent: boolean | null;
+  image: string | null;
+  ready: boolean | null;
+  reason: string | null;
+  reported: boolean;
+  runtime: string | null;
 };
 
 const asRunnerBody = async (response: Response) =>
@@ -81,6 +90,11 @@ const stringArrayField = (value: unknown) =>
   Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
     : [];
+
+const recordField = (value: unknown) =>
+  typeof value === "object" && value !== null
+    ? value as Record<string, unknown>
+    : null;
 
 export async function getCodexRunnerReadiness(
   ownerId: string,
@@ -96,7 +110,7 @@ export async function getCodexRunnerReadiness(
 
   const readyResponse = await runnerFetch(ownerId, "/readyz", {
     method: "GET",
-    signal: AbortSignal.timeout(25_000),
+    signal: AbortSignal.timeout(8_000),
   });
   if (!readyResponse.ok) {
     throw new Error(await readRunnerError(readyResponse));
@@ -107,6 +121,9 @@ export async function getCodexRunnerReadiness(
     typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
   const stringField = (value: unknown) =>
     typeof value === "string" && value.trim() ? value.trim() : null;
+  const tycho = recordField(ready.tycho) ?? recordField(health.tycho);
+  const nullableBooleanField = (value: unknown) =>
+    typeof value === "boolean" ? value : null;
 
   return {
     reachable: true,
@@ -119,10 +136,21 @@ export async function getCodexRunnerReadiness(
     workspaceIdsSupported: Array.isArray(ready.workspaceIds),
     hasDefaultWorkspace:
       ready.hasDefaultWorkspace === true || health.hasDefaultWorkspace === true,
-    tychoReady: ready.tychoReady === true,
-    tychoRuntime: stringField(ready.tychoRuntime),
-    tychoImage: stringField(ready.tychoImage),
-    tychoStatus: stringField(ready.tychoStatus),
+    tycho: {
+      decision: stringField(tycho?.decision),
+      filesystemExperimentPresent: nullableBooleanField(
+        tycho?.filesystemExperimentPresent,
+      ),
+      filesystemProtocolPresent: nullableBooleanField(
+        tycho?.filesystemProtocolPresent,
+      ),
+      filesystemResultPresent: nullableBooleanField(tycho?.filesystemResultPresent),
+      image: stringField(tycho?.image),
+      ready: nullableBooleanField(tycho?.ready),
+      reason: stringField(tycho?.reason),
+      reported: tycho !== null,
+      runtime: stringField(tycho?.runtime),
+    },
   };
 }
 
