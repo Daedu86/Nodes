@@ -5,8 +5,6 @@ import path from "node:path";
 
 import { buildSkill, skillRef, validateSkill } from "./skill-schema.mjs";
 
-const asString = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
-
 export function createSkillRegistry(options = {}) {
   const rootDir = path.resolve(options.rootDir || process.env.TYCHO_LEARNING_STATE_DIR || path.join(os.homedir(), ".nodes-ai-canvas", "learning"));
   const skillDir = path.join(rootDir, "skills");
