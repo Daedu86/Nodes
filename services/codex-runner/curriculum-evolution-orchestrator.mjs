@@ -119,6 +119,30 @@ export function createCurriculumEvolutionOrchestrator(options = {}) {
     return { ...base, curriculum: curriculumStatus };
   }
 
+  async function enrichSnapshot(snapshot) {
+    if (!snapshot) return snapshot;
+    const curriculumStatus = await curriculum.status();
+    return {
+      ...snapshot,
+      learning: {
+        ...(isRecord(snapshot.learning) ? snapshot.learning : await core.learningStatus()),
+        curriculum: curriculumStatus,
+      },
+    };
+  }
+
+  async function start(input, ownerId) {
+    return enrichSnapshot(await core.start(input, ownerId));
+  }
+
+  async function get(runId, ownerId) {
+    return enrichSnapshot(await core.get(runId, ownerId));
+  }
+
+  async function cancel(runId, ownerId) {
+    return enrichSnapshot(await core.cancel(runId, ownerId));
+  }
+
   async function trainOffline(input = {}) {
     const base = await core.trainOffline(input);
     return {
@@ -129,6 +153,9 @@ export function createCurriculumEvolutionOrchestrator(options = {}) {
 
   return {
     ...core,
+    start,
+    get,
+    cancel,
     learningStatus,
     trainOffline,
     curriculumReport,
