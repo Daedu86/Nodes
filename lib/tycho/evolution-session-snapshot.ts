@@ -54,6 +54,7 @@ export type EvolutionEpisodeSnapshot = {
   episodeId: string;
   index: number;
   status: "running" | "completed" | "failed";
+  workspaceId: string | null;
   seed: EvolutionSeedSnapshot;
   startGeneration: number;
   endGeneration: number | null;
@@ -226,6 +227,7 @@ const parseV2 = (value: Record<string, unknown>): EvolutionSessionSnapshot | nul
       typeof rawEpisode.episodeId !== "string" ||
       !Number.isInteger(rawEpisode.index) ||
       !isSnapshotStatus(rawEpisode.status) ||
+      !nullableString(rawEpisode.workspaceId) ||
       !isSeedSnapshot(rawEpisode.seed) ||
       !Number.isInteger(rawEpisode.startGeneration) ||
       !(rawEpisode.endGeneration === null || Number.isInteger(rawEpisode.endGeneration)) ||
@@ -285,6 +287,7 @@ const migrateV1 = (value: Record<string, unknown>): EvolutionSessionSnapshot | n
     episodeId: "episode-1",
     index: 1,
     status: value.status,
+    workspaceId: null,
     seed: value.seed,
     startGeneration,
     endGeneration,
