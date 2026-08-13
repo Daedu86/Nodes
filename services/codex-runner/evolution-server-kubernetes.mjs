@@ -1,16 +1,16 @@
 import http from "node:http";
 
 import { readEvolutionRunnerConfig } from "./evolution-config.mjs";
-import { createDurableEvolutionOrchestrator } from "./evolution-orchestrator.mjs";
 import { readKagentEvolutionReadiness } from "./kagent-readiness.mjs";
 import { createKubernetesEvolutionBackend } from "./kubernetes-evolution-backend.mjs";
+import { createLearningEvolutionOrchestrator } from "./learning-evolution-orchestrator.mjs";
 
 const RUNNER_CONFIG = readEvolutionRunnerConfig();
 const PORT = RUNNER_CONFIG.port;
 const HOST = process.env.CODEX_RUNNER_HOST || "127.0.0.1";
 const RUNNER_TOKEN = process.env.CODEX_RUNNER_TOKEN?.trim() || null;
 const backend = createKubernetesEvolutionBackend();
-const durable = createDurableEvolutionOrchestrator({ host: "127.0.0.1", evolutionPort: PORT, token: RUNNER_TOKEN });
+const durable = createLearningEvolutionOrchestrator({ host: "127.0.0.1", evolutionPort: PORT, token: RUNNER_TOKEN });
 
 const asString = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
 
@@ -63,9 +63,10 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (url.pathname === "/readyz" && req.method === "GET") {
-      const [readiness, kagent] = await Promise.all([
+      const [readiness, kagent, learning] = await Promise.all([
         backend.ready(),
         readKagentEvolutionReadiness(),
+        durable.learningStatus(),
       ]);
       const ok = readiness.ok === true && kagent.kagentReady === true;
       return json(res, ok ? 200 : 503, {
@@ -74,7 +75,25 @@ const server = http.createServer(async (req, res) => {
         ok,
         durableEvolution: true,
         executionBackend: "kubernetes",
+        learning,
       });
+    }
+
+    if (url.pathname === "/v1/evolution/learning/status" && req.method === "GET") {
+      return json(res, 200, await durable.learningStatus());
+    }
+
+    if (url.pathname === "/v1/evolution/learning/replay" && req.method === "GET") {
+      const workspaceId = asString(url.searchParams.get("workspaceId"));
+      return json(res, 200, await durable.replayStats(workspaceId ? { workspaceId } : {}));
+    }
+
+    if (url.pathname === "/v1/evolution/learning/train" && req.method === "POST") {
+      const body = await readJson(req);
+      return json(res, 200, await durable.trainOffline({
+        workspaceId: asString(body.workspaceId),
+        reset: body.reset === true,
+      }));
     }
 
     if (url.pathname === "/v1/evolution/episodes" && req.method === "POST") {
