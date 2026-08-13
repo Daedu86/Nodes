@@ -31,12 +31,20 @@ export type SessionPatchOptions = {
   ownerId?: string;
 };
 
+export type SessionReadOptions = {
+  claimLegacyOwnership?: boolean;
+};
+
 export interface SessionRepository {
   cleanupBlobStore(): Promise<SessionBlobCleanupResult>;
   createSession(input?: SessionCreateInput): Promise<SessionDocument>;
   deleteSession(sessionId: string, ownerId?: string): Promise<void>;
   deleteSessions(sessionIds: string[], ownerId?: string): Promise<void>;
-  getSession(sessionId: string, ownerId?: string): Promise<SessionDocument>;
+  getSession(
+    sessionId: string,
+    ownerId?: string,
+    options?: SessionReadOptions,
+  ): Promise<SessionDocument>;
   getSessionBlobMaintenanceSummary(): Promise<SessionBlobMaintenance>;
   listSessions(options?: SessionListOptions): Promise<SessionSummary[]>;
   patchSession(

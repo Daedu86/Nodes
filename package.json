@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
+  "bin": {
+    "nodes": "bin/nodes.mjs"
+  },
   "engines": {
     "node": "22.x"
   },
   "scripts": {
     "dev": "next dev",
+    "nodes": "node bin/nodes.mjs",
     "build": "next build",
     "bundle:budget": "node scripts/check-bundle-budget.mjs",
     "build:budget": "npm run build && npm run bundle:budget",
@@ -89,6 +93,7 @@
     "supabase": "^2.88.0",
     "tailwindcss": "^4.2.2",
     "typescript": "6.0.3",
+    "tsx": "^4.20.6",
     "vitest": "^4.1.10"
   },
   "overrides": {

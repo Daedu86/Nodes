@@ -228,6 +228,17 @@ npm run dev
 
 Then open `http://localhost:3000`.
 
+### Inspect Nodes state from the CLI
+
+The repository includes a read-only `nodes` CLI over the same project/session repositories and runner readiness service as the application. Give it an explicit local actor context, then inspect projects or obtain a provenance-aware execution diagnosis:
+
+```bash
+NODES_CLI_USER_ID='dev:demo@nodes.local' npm run nodes -- project list
+NODES_CLI_USER_ID='dev:demo@nodes.local' npm run nodes -- project diagnose <project-id> --json
+```
+
+Run `npm link` to expose `nodes` directly from this checkout. The CLI supports project, workload, session, runner, and Tycho status inspection; it never starts Codex or runs an experiment. See the [Nodes CLI guide](docs/nodes-cli.md) for commands, JSON schemas, authentication, exit codes, provenance rules, and security boundaries.
+
 For complete setup and validation commands, see the [development guide](docs/development.md). For production configuration, see the [deploying guide](docs/deploying.md) and [cloud persistence guide](docs/cloud-persistence.md).
 
 ## Deploy
