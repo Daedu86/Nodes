@@ -155,6 +155,7 @@ export async function runPersistedTychoEvolution(
     episodeId,
     index: episodeIndex,
     status: "running",
+    workspaceId: input.workspaceId,
     seed: seedSnapshot(startingCandidate),
     startGeneration: startingCandidate.generation + 1,
     endGeneration: null,
