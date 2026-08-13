@@ -1,8 +1,10 @@
 import { createRunnerCodexVariantGenerator } from "./codex-evolution-generator.mjs";
 import { createCurriculumController } from "./curriculum-controller.mjs";
 import { createLearningEvolutionOrchestrator } from "./learning-evolution-orchestrator.mjs";
+import { createPredictiveWorldModel } from "./predictive-world-model.mjs";
 import { createSkillRegistry } from "./skill-registry.mjs";
 import { createTrajectoryStore } from "./trajectory-store.mjs";
+import { createWorldModelVariantGenerator } from "./world-model-variant-generator.mjs";
 
 const isRecord = (value) => value && typeof value === "object" && !Array.isArray(value);
 const asString = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
@@ -21,6 +23,18 @@ function curriculumOptions(learning = {}) {
     maxDifficulty: learning.curriculumMaxDifficulty,
     targetReward: learning.curriculumTargetReward,
     allowedDomains: learning.curriculumAllowedDomains,
+  };
+}
+
+function worldModelOptions(learning = {}) {
+  return {
+    mode: learning.worldModelMode,
+    expansionFactor: learning.worldModelExpansionFactor,
+    maxPool: learning.worldModelMaxPool,
+    explorationWeight: learning.worldModelExplorationWeight,
+    costWeight: learning.worldModelCostWeight,
+    minSupport: learning.worldModelMinSupport,
+    minSimilarity: learning.worldModelMinSimilarity,
   };
 }
 
@@ -56,13 +70,24 @@ function stampCurriculum(generated, plan) {
 }
 
 export function createCurriculumEvolutionOrchestrator(options = {}) {
-  const replay = options.trajectoryStore || createTrajectoryStore(options.learning || {});
-  const skillRegistry = options.skillRegistry || createSkillRegistry(options.learning || {});
-  const curriculum = options.curriculumController || createCurriculumController(curriculumOptions(options.learning || {}));
-  const baseGenerator = options.generateVariants || createRunnerCodexVariantGenerator({
+  const learning = options.learning || {};
+  const replay = options.trajectoryStore || createTrajectoryStore(learning);
+  const skillRegistry = options.skillRegistry || createSkillRegistry(learning);
+  const curriculum = options.curriculumController || createCurriculumController(curriculumOptions(learning));
+  const rawGenerator = options.generateVariants || createRunnerCodexVariantGenerator({
     host: options.host || "127.0.0.1",
     codexPort: Number(options.codexPort || process.env.CODEX_RUNNER_PORT || 8787),
     token: options.token ?? process.env.CODEX_RUNNER_TOKEN?.trim() ?? null,
+  });
+  const worldModel = options.worldModel || createPredictiveWorldModel({
+    trajectoryStore: replay,
+    minSupport: learning.worldModelMinSupport ?? process.env.TYCHO_WORLD_MODEL_MIN_SUPPORT,
+    minSimilarity: learning.worldModelMinSimilarity ?? process.env.TYCHO_WORLD_MODEL_MIN_SIMILARITY,
+  });
+  const worldGenerator = options.worldModelGenerator || createWorldModelVariantGenerator({
+    baseGenerator: rawGenerator,
+    worldModel,
+    ...worldModelOptions(learning),
   });
 
   async function curriculumGenerator(input) {
@@ -77,8 +102,8 @@ export function createCurriculumEvolutionOrchestrator(options = {}) {
       generation: input.generation,
       defaultDomain: parentDomain(input),
     });
-    if (!plan.task) return baseGenerator(input);
-    const generated = await baseGenerator({
+    if (!plan.task) return worldGenerator.generate(input);
+    const generated = await worldGenerator.generate({
       ...input,
       parentEvaluation: withCurriculumEvidence(input.parentEvaluation, plan),
     });
@@ -114,19 +139,31 @@ export function createCurriculumEvolutionOrchestrator(options = {}) {
     });
   }
 
+  async function worldModelStatus(workspaceId = null) {
+    return worldGenerator.status(workspaceId);
+  }
+
   async function learningStatus() {
-    const [base, curriculumStatus] = await Promise.all([core.learningStatus(), curriculum.status()]);
-    return { ...base, curriculum: curriculumStatus };
+    const [base, curriculumStatus, predictiveStatus] = await Promise.all([
+      core.learningStatus(),
+      curriculum.status(),
+      worldModelStatus(),
+    ]);
+    return { ...base, curriculum: curriculumStatus, worldModel: predictiveStatus };
   }
 
   async function enrichSnapshot(snapshot) {
     if (!snapshot) return snapshot;
-    const curriculumStatus = await curriculum.status();
+    const [curriculumStatus, predictiveStatus] = await Promise.all([
+      curriculum.status(),
+      worldModelStatus(snapshot.workspaceId),
+    ]);
     return {
       ...snapshot,
       learning: {
         ...(isRecord(snapshot.learning) ? snapshot.learning : await core.learningStatus()),
         curriculum: curriculumStatus,
+        worldModel: predictiveStatus,
       },
     };
   }
@@ -148,6 +185,7 @@ export function createCurriculumEvolutionOrchestrator(options = {}) {
     return {
       ...base,
       curriculum: await curriculumReport(input.workspaceId || null, input.defaultDomain || "general-evolution"),
+      worldModel: await worldModelStatus(input.workspaceId || null),
     };
   }
 
@@ -160,5 +198,7 @@ export function createCurriculumEvolutionOrchestrator(options = {}) {
     trainOffline,
     curriculumReport,
     curriculumPlan,
+    worldModelStatus,
+    worldModelPredict: (input) => worldModel.predict(input),
   };
 }
