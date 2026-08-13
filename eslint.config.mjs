@@ -18,6 +18,14 @@ export default defineConfig([
     },
   },
   {
+    files: ["services/codex-runner/evolution-orchestrator.mjs"],
+    rules: {
+      // Generation evidence deliberately strips the winning spec with object-rest
+      // before persisting attempt snapshots. Treat that sibling omission as use.
+      "@typescript-eslint/no-unused-vars": ["warn", { ignoreRestSiblings: true }],
+    },
+  },
+  {
     files: ["tests/e2e/smoke.spec.ts"],
     rules: {
       // The smoke suite intentionally retains intermediate snapshots for
