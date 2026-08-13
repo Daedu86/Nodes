@@ -39,4 +39,9 @@ patched = bindLocalImport(patched, "workspace-artifacts.mjs");
 
 const runtimePath = path.join(os.tmpdir(), `nodes-codex-runner-${process.pid}.mjs`);
 await writeFile(runtimePath, patched, "utf8");
+
+// Both listeners live on the trusted runner machine. The existing Codex
+// control plane remains on CODEX_RUNNER_PORT; the Tycho evolution worker uses
+// TYCHO_EVOLUTION_RUNNER_PORT (default CODEX_RUNNER_PORT + 1).
 await import(pathToFileURL(runtimePath).href);
+await import(pathToFileURL(path.join(runnerDir, "evolution-server.mjs")).href);
