@@ -3,6 +3,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   rmSync,
 } from "node:fs";
@@ -67,9 +68,11 @@ export function createEvolutionWorkspace(sourceCwd, runId, workspaceFiles, optio
   );
   assertTempRootOutsideSource(source, tempRoot);
   mkdirSync(tempRoot, { recursive: true, mode: 0o700 });
-  const destination = path.join(tempRoot, runId);
-  if (existsSync(destination)) throw new Error("Evolution run workspace already exists.");
-  mkdirSync(destination, { recursive: false, mode: 0o700 });
+
+  // Let the OS choose an unpredictable suffix instead of deriving a temporary
+  // directory solely from the run id. mkdtemp performs creation atomically and
+  // prevents another local process from pre-creating the workspace path.
+  const destination = mkdtempSync(path.join(tempRoot, `${runId}-`));
 
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES;
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
