@@ -4,6 +4,7 @@ import path from "node:path";
 export const TYCHO_RESULT_PATH = ".nodes/tycho-result.json";
 const MAX_RESULT_BYTES = 1_000_000;
 const DECISIONS = new Set(["promote", "reject", "blocked"]);
+const ISOLATED_RUNTIMES = new Set(["docker", "finch", "kubernetes"]);
 
 const isRecord = (value) => value && typeof value === "object" && !Array.isArray(value);
 const asString = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
@@ -44,8 +45,8 @@ export function parseTychoEvolutionResult(value, expectedExperimentId = null) {
 
   if (!isRecord(value.sandbox)) throw new Error("Tycho result sandbox must be an object.");
   const runtime = asString(value.sandbox.runtime);
-  if (!runtime || !["docker", "finch"].includes(runtime)) {
-    throw new Error(`Tycho result must come from an isolated Docker/Finch runtime, received ${runtime ?? "missing"}.`);
+  if (!runtime || !ISOLATED_RUNTIMES.has(runtime)) {
+    throw new Error(`Tycho result must come from an isolated runtime, received ${runtime ?? "missing"}.`);
   }
 
   if (!Array.isArray(value.steps)) throw new Error("Tycho result steps must be an array.");
