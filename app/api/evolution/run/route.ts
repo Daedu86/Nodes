@@ -1,7 +1,7 @@
 import { requireLocalApiUser } from "@/lib/server/request-guards";
 import { runCodexTychoEvolution } from "@/lib/server/codex-tycho-evolution";
 import { getSession } from "@/lib/session-store";
-import { getEvolutionSessionArtifact } from "@/lib/tycho/evolution-session-snapshot";
+import { getEvolutionSessionSnapshot } from "@/lib/tycho/evolution-session-snapshot";
 import type { TychoEvolutionSpec } from "@/lib/tycho/evolution-backend";
 
 export const runtime = "nodejs";
@@ -60,6 +60,7 @@ type EvolutionRunBody = {
   populationSize?: unknown;
   candidateTimeoutMs?: unknown;
   generatorTimeoutMs?: unknown;
+  mode?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -79,6 +80,10 @@ export async function POST(request: Request) {
     const projectId = typeof body.projectId === "string" && body.projectId.trim()
       ? body.projectId.trim()
       : null;
+    const mode = body.mode === "continue" ? "continue" : body.mode === undefined || body.mode === "start"
+      ? "start"
+      : null;
+    if (!mode) throw new Error('mode must be either "start" or "continue".');
     const sessionId = new URL(request.url).searchParams.get("sessionId")?.trim() ?? "";
     if (!sessionId) throw new Error("sessionId query parameter is required.");
 
@@ -104,43 +109,88 @@ export async function POST(request: Request) {
     }
 
     const session = await getSession(sessionId, guarded.user.id);
-    if (getEvolutionSessionArtifact(session.artifacts)) {
+    const existingSnapshot = getEvolutionSessionSnapshot(session.artifacts);
+    if (existingSnapshot?.status === "running") {
+      return Response.json(
+        { error: "This Session already has an evolution episode running.", code: "evolution_running" },
+        { status: 409 },
+      );
+    }
+
+    if (mode === "start" && existingSnapshot) {
       return Response.json(
         {
-          error:
-            "This Session already has an evolution history. Starting another run is blocked to preserve provenance; continuation from the persisted champion requires an append-capable evolution schema.",
+          error: "This Session already has evolution history. Continue from its persisted champion instead.",
           code: "evolution_history_exists",
         },
         { status: 409 },
       );
     }
-
-    const protocolSpec = protocolFromSessionArtifacts(session.artifacts);
-    if (!protocolSpec) {
-      throw new Error(
-        "No .nodes/tycho-experiment.json artifact is available in this Session to use as the seed.",
+    if (mode === "continue" && !existingSnapshot) {
+      return Response.json(
+        {
+          error: "Evolution continuation requires an existing persisted history.",
+          code: "evolution_history_missing",
+        },
+        { status: 409 },
       );
     }
-    const seed = {
-      id: `seed-${protocolSpec.experimentId}`,
-      spec: protocolSpec,
-      metadata: { seedSource: "session-tycho-protocol" },
-    };
+
+    let seed;
+    if (mode === "continue") {
+      const champion = existingSnapshot!.champion;
+      if (!champion || champion.score === null) {
+        return Response.json(
+          {
+            error: "Evolution continuation requires a persisted scored champion.",
+            code: "evolution_champion_missing",
+          },
+          { status: 409 },
+        );
+      }
+      seed = {
+        id: champion.candidateId,
+        spec: champion.spec,
+        ...(champion.metadata ? { metadata: champion.metadata } : {}),
+      };
+    } else {
+      const protocolSpec = protocolFromSessionArtifacts(session.artifacts);
+      if (!protocolSpec) {
+        throw new Error(
+          "No .nodes/tycho-experiment.json artifact is available in this Session to use as the seed.",
+        );
+      }
+      seed = {
+        id: `seed-${protocolSpec.experimentId}`,
+        spec: protocolSpec,
+        metadata: { seedSource: "session-tycho-protocol" },
+      };
+    }
 
     const completed = await runCodexTychoEvolution({
       ownerId: guarded.user.id,
       sessionId,
-      projectId,
+      projectId: existingSnapshot?.projectId ?? projectId,
       workspaceId,
       generations,
       populationSize,
       seed,
       timeoutMs,
+      continueFromChampion: mode === "continue",
       generatorOptions: { timeoutMs: generatorTimeoutMs },
     });
 
+    const latestEpisode = completed.snapshot.episodes.at(-1) ?? null;
     return Response.json({
       status: completed.result.status,
+      episode: latestEpisode
+        ? {
+            episodeId: latestEpisode.episodeId,
+            index: latestEpisode.index,
+            startGeneration: latestEpisode.startGeneration,
+            endGeneration: latestEpisode.endGeneration,
+          }
+        : null,
       finalWinner:
         completed.result.status === "completed"
           ? {
