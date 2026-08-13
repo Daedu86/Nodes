@@ -16,6 +16,7 @@ import { ModelSelector } from "@/components/assistant-ui/model-selector";
 import { LlmToggleButton } from "@/components/assistant-ui/llm-toggle";
 import { useLlmEnabled } from "@/components/context/llm-enabled";
 import { useSessionUiState, type SessionViewMode } from "@/components/context/session-ui-state";
+import { EvolutionSessionSheet } from "@/components/workspace/evolution-session-sheet";
 import { SessionContextSheet } from "@/components/workspace/session-context-sheet";
 import { WorkspaceOnboardingDialog } from "@/components/workspace/workspace-onboarding-dialog";
 
@@ -94,6 +95,7 @@ export const AppHeader = () => {
           userId={session?.user?.id ?? null}
         />
         <ModelSelector />
+        <EvolutionSessionSheet />
         <SessionContextSheet />
         <span
           className={`rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.14em] ${
