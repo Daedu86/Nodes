@@ -65,7 +65,8 @@ describe("project execution context", () => {
     expect(prompt).toContain("tictoc-unnecessary-abort-detection");
     expect(prompt).toContain("xlsx-recover-data");
     expect(prompt).toContain("data-to-d3");
-    expect(prompt).toContain("authoritative execution instructions");
+    expect(prompt).toContain("selected workload session artifacts and explicitly selected upstream outputs are authoritative");
+    expect(prompt).toContain("Do not recursively scan the repository");
   });
 
   it("bounds oversized artifact content", () => {
