@@ -3,7 +3,7 @@ import {
   runEvolutionLoop,
   type EvolutionEvaluator,
   type EvolutionExecutionBackend,
-  type TychoVariantGenerator,
+  type EvolutionVariantGenerator,
 } from "../lib/tycho-evolution-loop";
 
 type Spec = { value: number };
@@ -21,8 +21,8 @@ const evaluator: EvolutionEvaluator<Spec, Execution, Context> = {
 };
 
 const makeGenerator = (
-  generate: TychoVariantGenerator<Spec, Context>["generate"],
-): TychoVariantGenerator<Spec, Context> => ({ generate });
+  generate: EvolutionVariantGenerator<Spec, Context>["generate"],
+): EvolutionVariantGenerator<Spec, Context> => ({ generate });
 
 describe("tycho evolution loop", () => {
   it("selects the highest evaluated score as the generation winner", async () => {
