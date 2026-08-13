@@ -132,12 +132,12 @@ export function EvolutionRunControl() {
         </label>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          <NumberField label="Generations" value={generations} min={1} max={6} onChange={setGenerations} />
+          <NumberField label="Generations" value={generations} min={1} max={2} onChange={setGenerations} />
           <NumberField label="Population / generation" value={populationSize} min={1} max={12} onChange={setPopulationSize} />
         </div>
 
         <div className="rounded-xl border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-          Maximum configured budget: 6 generations × 12 candidates. Candidate runs remain bounded by the server-side Tycho timeout.
+          Interactive launches are capped at 2 generations so the request stays within the 300-second hosting envelope. Candidates in each generation still execute in parallel on the Tycho runner.
         </div>
 
         {error ? <p className="text-xs text-rose-700 dark:text-rose-300">{error}</p> : null}
