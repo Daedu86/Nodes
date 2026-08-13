@@ -143,6 +143,22 @@ function selectWinner(attempts) {
   })[0] ?? null;
 }
 
+async function mapWithConcurrency(items, concurrency, mapper) {
+  if (!items.length) return [];
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 function publicRun(run) {
   return {
     schemaVersion: run.schemaVersion,
@@ -177,6 +193,12 @@ export function createDurableEvolutionOrchestrator(options = {}) {
   const evolutionBaseUrl = `http://${evolutionHost}:${evolutionPort}`;
   const token = options.token ?? process.env.CODEX_RUNNER_TOKEN?.trim() ?? null;
   const stateDir = path.resolve(options.stateDir || process.env.TYCHO_EVOLUTION_STATE_DIR || path.join(os.homedir(), ".nodes-ai-canvas", "evolution-runs"));
+  const candidateConcurrency = boundedInteger(
+    options.candidateConcurrency ?? Number(process.env.TYCHO_EVOLUTION_MAX_CONCURRENCY || 4),
+    4,
+    32,
+    "candidateConcurrency",
+  );
   const runs = new Map();
   const tasks = new Map();
   const generateVariants = options.generateVariants || createRunnerCodexVariantGenerator({
@@ -414,7 +436,11 @@ export function createDurableEvolutionOrchestrator(options = {}) {
 
           run.phase = "executing_generation";
           await persist(run);
-          const attempts = await Promise.all(candidates.map((candidate, index) => executeCandidate(run, candidate, index)));
+          const attempts = await mapWithConcurrency(
+            candidates,
+            candidateConcurrency,
+            (candidate, index) => executeCandidate(run, candidate, index),
+          );
           if (run.cancelRequested) throw new Error("Evolution episode cancelled.");
           const winner = selectWinner(attempts);
           if (!winner) {
@@ -535,11 +561,11 @@ export function createDurableEvolutionOrchestrator(options = {}) {
     if (TERMINAL.has(run.status)) return publicRun(run);
     run.cancelRequested = true;
     run.phase = "cancelling";
+    await persist(run);
     await Promise.all([
       cancelCodex(run.ownerId, run.activeGeneratorRunId),
       ...[...run.activeCandidateRunIds].map((candidateRunId) => cancelCandidate(run.ownerId, candidateRunId)),
     ]);
-    await persist(run);
     return publicRun(run);
   }
 
@@ -555,7 +581,14 @@ export function createDurableEvolutionOrchestrator(options = {}) {
         if (!TERMINAL.has(run.status)) {
           run.activeGeneratorRunId = null;
           run.activeCandidateRunIds.clear();
-          run.cancelRequested = false;
+          if (run.cancelRequested) {
+            run.status = "cancelled";
+            run.phase = "cancelled";
+            run.reason = "Evolution episode cancelled before runner recovery completed.";
+            run.finishedAt = new Date().toISOString();
+            await persist(run);
+            continue;
+          }
           run.status = "queued";
           run.phase = "recovering";
           await persist(run);
@@ -570,11 +603,11 @@ export function createDurableEvolutionOrchestrator(options = {}) {
   async function shutdown() {
     for (const run of runs.values()) {
       if (TERMINAL.has(run.status)) continue;
-      run.cancelRequested = true;
       await Promise.all([
         cancelCodex(run.ownerId, run.activeGeneratorRunId),
         ...[...run.activeCandidateRunIds].map((candidateRunId) => cancelCandidate(run.ownerId, candidateRunId)),
       ]);
+      run.cancelRequested = false;
       run.status = "queued";
       run.phase = "recovering";
       run.activeGeneratorRunId = null;
