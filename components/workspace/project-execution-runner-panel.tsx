@@ -3,8 +3,10 @@
 import React from "react";
 import { createPortal } from "react-dom";
 import {
+  Check,
   CheckCircle2,
   CircleAlert,
+  Copy,
   Loader2,
   PanelRightOpen,
   Play,
@@ -115,6 +117,7 @@ export function ProjectExecutionRunnerPanel({
   const [message, setMessage] = React.useState<string | null>(null);
   const [pendingLaunch, setPendingLaunch] = React.useState<PendingLaunch | null>(null);
   const [managedLocalId, setManagedLocalId] = React.useState<string | null>(null);
+  const [agentOutputCopied, setAgentOutputCopied] = React.useState(false);
   const [headerActions, setHeaderActions] = React.useState<HTMLElement | null>(null);
 
   const projectMap = React.useMemo(() => normalizeProjectMap(project.map), [project.map]);
@@ -178,6 +181,10 @@ export function ProjectExecutionRunnerPanel({
     setPreparing(false);
     setMessage(null);
   }, [selectedSessionId]);
+
+  React.useEffect(() => {
+    setAgentOutputCopied(false);
+  }, [managedNode?.id, managedData?.agentOutput]);
 
   React.useEffect(() => {
     if (!pendingLaunch) return;
@@ -250,6 +257,17 @@ export function ProjectExecutionRunnerPanel({
   );
 
   const effectiveNextStep = status?.nextStep ?? null;
+
+  const copyAgentOutput = React.useCallback(async () => {
+    if (!managedData?.agentOutput) return;
+    try {
+      await navigator.clipboard.writeText(managedData.agentOutput);
+      setAgentOutputCopied(true);
+    } catch {
+      setAgentOutputCopied(false);
+      setMessage("Unable to copy the agent result. Select the result text and copy it manually.");
+    }
+  }, [managedData?.agentOutput]);
 
   const runSelectedWorkload = React.useCallback(async () => {
     if (!selectedNode || !selectedSessionId || !canRun || runBusy) return;
@@ -422,7 +440,20 @@ export function ProjectExecutionRunnerPanel({
                 </span>
               </div>
               {managedData.agentOutput ? (
-                <pre className="mt-3 max-h-52 overflow-auto whitespace-pre-wrap rounded-xl border border-border/60 bg-background p-3 text-xs leading-5 text-foreground">{managedData.agentOutput}</pre>
+                <div className="relative mt-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="absolute right-2 top-2 z-10 h-8 w-8 bg-background/95"
+                    aria-label={agentOutputCopied ? "Agent result copied" : "Copy agent result"}
+                    title={agentOutputCopied ? "Copied" : "Copy agent result"}
+                    onClick={() => void copyAgentOutput()}
+                  >
+                    {agentOutputCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  </Button>
+                  <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded-xl border border-border/60 bg-background p-3 pr-12 text-xs leading-5 text-foreground">{managedData.agentOutput}</pre>
+                </div>
               ) : null}
               {managedData.agentError ? (
                 <p className="mt-3 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-700">{managedData.agentError}</p>
