@@ -217,6 +217,11 @@ export async function getCodexRunnerReadiness(
   const stringField = (value: unknown) =>
     typeof value === "string" && value.trim() ? value.trim() : null;
   const tycho = recordField(ready.tycho) ?? recordField(health.tycho);
+  const tychoReported =
+    tycho !== null ||
+    ["tychoReady", "tychoRuntime", "tychoImage", "tychoStatus"].some(
+      (key) => key in ready || key in health,
+    );
   const nullableBooleanField = (value: unknown) =>
     typeof value === "boolean" ? value : null;
 
@@ -245,11 +250,22 @@ export async function getCodexRunnerReadiness(
         tycho?.filesystemProtocolPresent,
       ),
       filesystemResultPresent: nullableBooleanField(tycho?.filesystemResultPresent),
-      image: stringField(tycho?.image),
-      ready: nullableBooleanField(tycho?.ready),
-      reason: stringField(tycho?.reason),
-      reported: tycho !== null,
-      runtime: stringField(tycho?.runtime),
+      image:
+        stringField(tycho?.image) ??
+        stringField(ready.tychoImage) ??
+        stringField(health.tychoImage),
+      ready: nullableBooleanField(
+        tycho?.ready ?? ready.tychoReady ?? health.tychoReady,
+      ),
+      reason:
+        stringField(tycho?.reason) ??
+        stringField(ready.tychoStatus) ??
+        stringField(health.tychoStatus),
+      reported: tychoReported,
+      runtime:
+        stringField(tycho?.runtime) ??
+        stringField(ready.tychoRuntime) ??
+        stringField(health.tychoRuntime),
     },
   };
 }
