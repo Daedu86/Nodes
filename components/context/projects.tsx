@@ -188,13 +188,18 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
   }, [setActiveProject, userId]);
 
   const selectProject = React.useCallback(async (projectId: string) => {
-    setIsReady(false);
+    const isSwitchingProject = activeProjectRef.current?.id !== projectId;
+    if (isSwitchingProject) {
+      setIsReady(false);
+    }
     try {
       await loadProject(projectId);
     } finally {
-      setIsReady(true);
+      if (isSwitchingProject) {
+        setIsReady(true);
+      }
     }
-  }, [loadProject]);
+  }, [activeProjectRef, loadProject]);
 
   const createProject = React.useCallback(async (input?: ProjectCreatePatch) => {
     setIsReady(false);
