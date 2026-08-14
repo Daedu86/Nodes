@@ -20,6 +20,8 @@
 </p>
 
 <p align="center">
+  <a href="docs/evaluation-guide.md"><strong>Evaluate in 5 minutes</strong></a>
+  ·
   <a href="docs/product-demo.md"><strong>60-second demo</strong></a>
   ·
   <a href="docs/system-architecture.md"><strong>System architecture</strong></a>
@@ -88,36 +90,13 @@ This keeps orchestration, provenance, and decision state visible while execution
 - Use Tycho as an isolated empirical experiment and evidence harness.
 - Place evolution candidates locally or in Kubernetes Jobs.
 - Inspect Kubernetes execution with a read-only kagent observer.
-- Inspect project, session, runner, and Tycho state with the read-only `nodes` CLI.
+- Inspect project/session/runner/Tycho state with the read-only `nodes` CLI.
 
-## Run the deterministic demo
+## Evaluate Nodes quickly
 
-The repository includes a seeded product tour that does not depend on waiting for a live model response.
+If you are reviewing Nodes for the first time, start with [Evaluate Nodes in 5 minutes](docs/evaluation-guide.md). It walks through the product loop first and only then points to the deeper runtime and learning architecture.
 
-```bash
-npm ci
-cp .env.example .env.local
-npm run demo:seed
-npm run dev
-```
-
-On Windows PowerShell:
-
-```powershell
-Copy-Item .env.example .env.local
-```
-
-Set the local development credentials described in [docs/product-demo.md](docs/product-demo.md), sign in, and open **[Demo] Nodes product launch**.
-
-The recommended 60-second path is:
-
-1. branch two positioning directions;
-2. preserve evidence and the chosen direction on Canvas;
-3. compare alternatives in Arena;
-4. promote the winner;
-5. reuse that decision from project memory or Context Builder.
-
-See [docs/product-demo.md](docs/product-demo.md) for the complete presentation script and reset commands.
+For a deterministic presentation, use the [60-second seeded product demo](docs/product-demo.md).
 
 ## Architecture at a glance
 
@@ -142,26 +121,43 @@ flowchart TB
   Evidence --> Repos
 ```
 
-The browser is the **control plane**, not the execution boundary. Runtime placement and local workspace resolution remain runner responsibilities. Kubernetes is the scheduling authority for cluster candidates; kagent observes the cluster but is not inserted into deterministic scheduling or promotion.
+The browser is the **control plane**, not the execution boundary. Runtime placement and local workspace resolution remain runner responsibilities. Kubernetes is the scheduling authority for cluster candidates; kagent observes the cluster but is not inserted into the deterministic scheduling or promotion path.
 
 See [docs/system-architecture.md](docs/system-architecture.md) for the canonical whole-system architecture.
 
 ## Advanced execution and learning
 
-Nodes also contains an optional M1–M8 capability stack for adaptive execution. These are **capabilities, not mandatory sequential stages** and they are intentionally secondary to the core decision workflow.
+M1–M8 are optional capabilities, not mandatory sequential stages for every project. They extend the core decision workflow when a workload needs empirical optimization, distributed execution, learned strategy selection or planning.
 
 | Capability | Purpose |
 | --- | --- |
-| **M1 — Evolution** | Candidate populations, deterministic evaluation, durable episodes, lineage, and champions. |
+| **M1 — Evolution** | Candidate populations, deterministic evaluation, durable episodes, lineage and champions. |
 | **M2 — Kubernetes** | Isolated candidate Jobs plus read-only kagent diagnostics. |
 | **M3 — Learned policy** | Trajectory/reward storage and learned strategy selection. |
 | **M4 — Multi-agent** | Hierarchical specialist/team coordination. |
-| **M5 — Skill learning** | Mine, validate, store, retrieve, and reuse skills. |
+| **M5 — Skill learning** | Mine, validate, store, retrieve and reuse skills. |
 | **M6 — Curriculum** | Select or generate tasks from learning progress and capability gaps. |
-| **M7 — World model** | Predict transitions and outcomes before expensive execution. |
+| **M7 — World model** | Predict transitions/outcomes before expensive execution. |
 | **M8 — Planning** | Search predicted futures and choose promising actions before execution. |
 
 A workload may use direct execution only, M1+M2, or a richer combination. Learned components can choose what to try; empirical execution and evidence remain the promotion gate.
+
+## Run the seeded demo
+
+```bash
+npm ci
+cp .env.example .env.local
+npm run demo:seed
+npm run dev
+```
+
+On Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env.local
+```
+
+Set a local development password in `.env.local`, sign in, and open the seeded demo project. Use `npm run demo:reset` to restore it. See [docs/product-demo.md](docs/product-demo.md).
 
 ## Developer quick start
 
@@ -181,11 +177,21 @@ Then open `http://localhost:3000`.
 
 For full setup and validation commands, see [docs/development.md](docs/development.md). For production configuration, see [docs/deploying.md](docs/deploying.md) and [docs/cloud-persistence.md](docs/cloud-persistence.md).
 
-## Quality gates
+## Engineering quality gates
 
-The main CI workflow covers formatting/lint, application and E2E type checks, unit and coverage gates, production build and bundle budget, accessibility E2E in Chromium and Firefox, dependency auditing, Canvas performance budgets, and sharded Playwright E2E.
+The main CI pipeline enforces:
 
-The repository also includes CodeQL scanning and a public [security policy](SECURITY.md).
+- formatting/lint with zero warnings;
+- application and E2E TypeScript checks;
+- unit and repository coverage;
+- critical-module coverage;
+- production build and JavaScript bundle budget;
+- Playwright E2E coverage;
+- accessibility checks in Chromium and Firefox;
+- production and lockfile dependency audits;
+- Canvas performance budgets.
+
+CodeQL runs as a separate security-analysis workflow.
 
 ## Nodes CLI
 
@@ -217,9 +223,7 @@ Nodes uses repository abstractions so local development can use the file backend
 
 ## Project status
 
-Nodes is under active development toward a stable `1.0`. Interfaces, persistence details, and operational defaults may evolve.
-
-Current product-readiness priorities are tracked in the [roadmap](ROADMAP.md), including a stable public demo experience, expanded onboarding, starter projects, responsive improvements, and additional manual accessibility review.
+Nodes is under active development toward a stable `1.0`. Interfaces, persistence details, and operational defaults may evolve. Contributions should include focused changes, tests, and clear operational or user-visible impact.
 
 - [Roadmap](ROADMAP.md)
 - [Contributing](CONTRIBUTING.md)
