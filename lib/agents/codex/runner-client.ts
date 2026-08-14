@@ -87,6 +87,44 @@ export type CodexRunnerTychoReadiness = {
   runtime: string | null;
 };
 
+export type CodexRunnerControlAction =
+  | "runtime.start"
+  | "runtime.stop"
+  | "auth.login"
+  | "auth.logout"
+  | "workspace.attach"
+  | "workspace.detach"
+  | "tycho.verify";
+
+export type CodexRunnerControlStatus = {
+  activeRunCount: number;
+  authenticated: boolean;
+  codexRunning: boolean;
+  controlAvailable: boolean;
+  hasDefaultWorkspace: boolean;
+  model: string | null;
+  ok: boolean;
+  reachable: boolean;
+  tychoImage: string | null;
+  tychoReady: boolean;
+  tychoRuntime: string | null;
+  tychoStatus: string | null;
+  workspaceConfigured: boolean;
+  workspaceCount: number;
+  workspaceManaged: boolean;
+};
+
+export type CodexRunnerLoginPrompt = {
+  loginId: string | null;
+  userCode: string;
+  verificationUrl: string;
+};
+
+export type CodexRunnerControlResult = {
+  login: CodexRunnerLoginPrompt | null;
+  status: CodexRunnerControlStatus;
+};
+
 const asRunnerBody = async (response: Response) =>
   ((await response.json().catch(() => null)) as Record<string, unknown> | null) ?? {};
 
@@ -99,6 +137,37 @@ const recordField = (value: unknown) =>
   typeof value === "object" && value !== null
     ? value as Record<string, unknown>
     : null;
+
+const booleanField = (value: unknown) => value === true;
+
+const numberField = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.trunc(value))
+    : 0;
+
+const stringField = (value: unknown) =>
+  typeof value === "string" && value.trim() ? value.trim() : null;
+
+const controlStatusField = (value: unknown): CodexRunnerControlStatus => {
+  const status = recordField(value) ?? {};
+  return {
+    activeRunCount: numberField(status.activeRunCount),
+    authenticated: booleanField(status.authenticated),
+    codexRunning: booleanField(status.codexRunning),
+    controlAvailable: booleanField(status.controlAvailable),
+    hasDefaultWorkspace: booleanField(status.hasDefaultWorkspace),
+    model: stringField(status.model),
+    ok: booleanField(status.ok),
+    reachable: booleanField(status.reachable),
+    tychoImage: stringField(status.tychoImage),
+    tychoReady: booleanField(status.tychoReady),
+    tychoRuntime: stringField(status.tychoRuntime),
+    tychoStatus: stringField(status.tychoStatus),
+    workspaceConfigured: booleanField(status.workspaceConfigured),
+    workspaceCount: numberField(status.workspaceCount),
+    workspaceManaged: booleanField(status.workspaceManaged),
+  };
+};
 
 const modelOptionsField = (value: unknown): CodexModelOption[] => {
   if (!Array.isArray(value)) return [];
@@ -182,6 +251,48 @@ export async function getCodexRunnerReadiness(
       reported: tycho !== null,
       runtime: stringField(tycho?.runtime),
     },
+  };
+}
+
+export async function getCodexRunnerControlStatus(
+  ownerId: string,
+  workspaceId: string | null,
+): Promise<CodexRunnerControlStatus> {
+  const query = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : "";
+  const response = await runnerFetch(ownerId, `/v1/control/status${query}`, {
+    method: "GET",
+    signal: AbortSignal.timeout(25_000),
+  });
+  if (!response.ok) throw new Error(await readRunnerError(response));
+  return controlStatusField(await asRunnerBody(response));
+}
+
+export async function controlCodexRunner(
+  ownerId: string,
+  action: CodexRunnerControlAction,
+  workspaceId: string | null,
+): Promise<CodexRunnerControlResult> {
+  const response = await runnerFetch(ownerId, "/v1/control", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action, workspaceId }),
+    signal: AbortSignal.timeout(55_000),
+  });
+  if (!response.ok) throw new Error(await readRunnerError(response));
+  const body = await asRunnerBody(response);
+  const login = recordField(body.login);
+  const verificationUrl = stringField(login?.verificationUrl);
+  const userCode = stringField(login?.userCode);
+  return {
+    login:
+      verificationUrl && userCode
+        ? {
+            loginId: stringField(login?.loginId),
+            userCode,
+            verificationUrl,
+          }
+        : null,
+    status: controlStatusField(body.status),
   };
 }
 

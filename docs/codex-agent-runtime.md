@@ -147,6 +147,8 @@ The runner exposes:
 ```text
 GET  /healthz
 GET  /readyz
+GET  /v1/control/status
+POST /v1/control
 POST /v1/runs
 GET  /v1/runs/:runId/events
 POST /v1/runs/:runId/cancel
@@ -154,6 +156,8 @@ POST /v1/runs/:runId/approvals/:approvalId
 ```
 
 `/healthz` is a liveness probe. Authenticated `/readyz` starts app-server if needed and calls `account/read` to verify that the Codex runtime is responsive.
+
+Agent Work uses `/v1/control/status` for a non-starting status read and `/v1/control` for explicit runtime, device-login, trusted-default-workspace, and Tycho-verification actions. The installed Windows launcher handles the otherwise impossible first hop when both the runner and ngrok tunnel are offline. Browser requests never contain local filesystem paths or authentication files.
 
 A successful run start response:
 

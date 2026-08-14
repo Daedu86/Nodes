@@ -28,20 +28,20 @@ const getCodexRuntimeState = async () => {
     const token = process.env.CODEX_RUNNER_TOKEN?.trim();
     if (token) headers.set("authorization", `Bearer ${token}`);
 
-    const [readyResponse, usageResponse] = await Promise.all([
-      fetch(`${baseUrl}/readyz`, {
+    let readyResponse = await fetch(`${baseUrl}/v1/control/status`, {
+      method: "GET",
+      headers,
+      cache: "no-store",
+      signal: AbortSignal.timeout(6_000),
+    });
+    if (readyResponse.status === 404) {
+      readyResponse = await fetch(`${baseUrl}/readyz`, {
         method: "GET",
         headers,
         cache: "no-store",
         signal: AbortSignal.timeout(6_000),
-      }),
-      fetch(`${baseUrl}/v1/account/usage`, {
-        method: "GET",
-        headers,
-        cache: "no-store",
-        signal: AbortSignal.timeout(8_000),
-      }).catch(() => null),
-    ]);
+      });
+    }
 
     const readyBody = readyResponse.ok
       ? ((await readyResponse.json().catch(() => null)) as
@@ -51,6 +51,15 @@ const getCodexRuntimeState = async () => {
     const connected = Boolean(
       readyBody?.ok && readyBody?.codexRunning && readyBody?.authenticated,
     );
+
+    const usageResponse = connected
+      ? await fetch(`${baseUrl}/v1/account/usage`, {
+        method: "GET",
+        headers,
+        cache: "no-store",
+        signal: AbortSignal.timeout(8_000),
+      }).catch(() => null)
+      : null;
 
     const usage = usageResponse?.ok
       ? ((await usageResponse.json().catch(() => null)) as CodexUsageSnapshot)
@@ -144,10 +153,8 @@ export async function GET(req: Request) {
   const projectsById = new Map(projects.map((p) => [p.id, p]));
 
   const sessionIds = new Set<string>();
-  const projectIds = new Set<string>();
   events.forEach((event) => {
     if (event.sessionId) sessionIds.add(event.sessionId);
-    if (event.projectId) projectIds.add(event.projectId);
   });
 
   const agents = tokens
@@ -203,9 +210,7 @@ export async function GET(req: Request) {
     sessions: [...sessionIds]
       .map((id) => sessionsById.get(id))
       .filter(Boolean) as AgentWorkResponse["sessions"],
-    projects: [...projectIds]
-      .map((id) => projectsById.get(id))
-      .filter(Boolean) as AgentWorkResponse["projects"],
+    projects: [...projectsById.values()] as AgentWorkResponse["projects"],
     events: events.map((event) => ({
       id: event.id,
       tokenId: event.tokenId,

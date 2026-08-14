@@ -5,11 +5,11 @@ import { createPortal } from "react-dom";
 import {
   CheckCircle2,
   CircleAlert,
-  Clipboard,
   Loader2,
   PanelRightOpen,
   Play,
   RefreshCw,
+  Settings2,
   ShieldCheck,
   Square,
   TerminalSquare,
@@ -298,15 +298,6 @@ export function ProjectExecutionRunnerPanel({
     upstreamSummary,
   ]);
 
-  const copyCommand = React.useCallback(async (command: string) => {
-    try {
-      await navigator.clipboard.writeText(command);
-      setMessage(`Copied: ${command}`);
-    } catch {
-      setMessage(`Run this on the runner machine: ${command}`);
-    }
-  }, []);
-
   if (project.accessRole !== "owner") return null;
 
   const runnerTrigger = (
@@ -371,13 +362,11 @@ export function ProjectExecutionRunnerPanel({
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
                     {effectiveNextStep?.detail ?? "Nodes will tell you exactly what must be done before this workload can run."}
                   </p>
-                  {effectiveNextStep?.command ? (
-                    <div className="mt-2 flex items-center gap-2 rounded-lg border border-border/60 bg-muted/30 px-2 py-2">
-                      <code className="min-w-0 flex-1 truncate text-xs">{effectiveNextStep.command}</code>
-                      <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void copyCommand(effectiveNextStep.command!)} aria-label="Copy runner command">
-                        <Clipboard className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
+                  {effectiveNextStep?.code !== "ready" ? (
+                    <Button type="button" variant="outline" size="sm" className="mt-2 gap-2" onClick={() => window.dispatchEvent(new Event("nodes:show-agent-work"))}>
+                      <Settings2 className="h-3.5 w-3.5" />
+                      Open Agent Work controls
+                    </Button>
                   ) : null}
                 </div>
               </div>

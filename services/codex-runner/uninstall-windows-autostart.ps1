@@ -26,4 +26,9 @@ function Remove-NodesTask {
 
 Remove-NodesTask -TaskName $RunnerTaskName
 Remove-NodesTask -TaskName $NgrokTaskName
+$protocolRoot = "HKCU:\Software\Classes\nodes-runner"
+if (Test-Path $protocolRoot) {
+  Remove-Item -Path $protocolRoot -Recurse -Force
+  Write-Host "Removed the nodes-runner:// Agent Work launcher."
+}
 Write-Host "Codex runner and ngrok will no longer start automatically."

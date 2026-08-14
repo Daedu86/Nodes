@@ -72,6 +72,12 @@ export function WorkspaceSurfaceProvider({
     }
   }, [activeSurface, storageKey]);
 
+  React.useEffect(() => {
+    const showAgentWork = () => setActiveSurface("agent-work");
+    window.addEventListener("nodes:show-agent-work", showAgentWork);
+    return () => window.removeEventListener("nodes:show-agent-work", showAgentWork);
+  }, []);
+
   const value = React.useMemo<WorkspaceSurfaceContextValue>(
     () => ({
       activeSurface,

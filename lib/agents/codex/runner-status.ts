@@ -51,16 +51,15 @@ export const nextStepForCodexRunner = (
   if (!status.codexRunning) {
     return {
       code: "start_runner",
-      title: "Start the local Codex Runner",
-      detail: "Nodes can reach the runner configuration, but the Codex app-server is not ready yet.",
+      title: "Enable the Codex runtime",
+      detail: "Open Agent Work and turn on the Codex runtime switch.",
     };
   }
   if (!status.authenticated) {
     return {
       code: "authenticate",
-      title: "Authenticate Codex on the runner machine",
-      detail: "Authentication remains local to Codex. Nodes never stores your Codex or ChatGPT credentials.",
-      command: "codex login",
+      title: "Sign in to Codex from Agent Work",
+      detail: "Agent Work creates a secure device sign-in link. Credentials remain local to Codex and never pass through Nodes.",
     };
   }
   if (workspaceId && !status.workspaceIdsSupported) {
@@ -73,8 +72,8 @@ export const nextStepForCodexRunner = (
   if (workspaceId && !workspaceConfigured) {
     return {
       code: "configure_workspace",
-      title: "Map this project to a runner workspace",
-      detail: `Add this project id to CODEX_WORKSPACES_JSON on the runner: ${workspaceId}`,
+      title: "Enable this project workspace",
+      detail: `Open Agent Work and map this project to the runner-owned default workspace: ${workspaceId}`,
     };
   }
   if (!workspaceId && !status.hasDefaultWorkspace && status.workspaceCount === 0) {
@@ -148,9 +147,9 @@ export async function getCodexProjectRunnerStatus({
             detail: "Set CODEX_RUNNER_URL on the Nodes server. Keep the runner bound to a trusted/local network and use CODEX_RUNNER_TOKEN when it is not loopback-only.",
           }
         : {
-            code: "start_runner",
-            title: "Start or reconnect the local Codex Runner",
-            detail: "Nodes could not reach the configured runner. Start it and use Check again.",
+          code: "start_runner",
+          title: "Reconnect the local execution bridge",
+          detail: "Open Agent Work and enable the installed Runner + secure tunnel switch, then check again.",
           },
       ok: false,
       reachable: false,

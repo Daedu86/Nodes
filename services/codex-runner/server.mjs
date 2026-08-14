@@ -1,6 +1,13 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import readline from "node:readline";
@@ -17,6 +24,10 @@ const AUTO_APPROVE = process.env.CODEX_RUNNER_AUTO_APPROVE === "1";
 const REQUEST_TIMEOUT_MS = Number(process.env.CODEX_RUNNER_REQUEST_TIMEOUT_MS || 30_000);
 const APPROVAL_TIMEOUT_MS = Number(process.env.CODEX_RUNNER_APPROVAL_TIMEOUT_MS || 300_000);
 const MAX_EVENT_BACKLOG = 500;
+const MANAGED_WORKSPACES_FILE = path.resolve(
+  process.env.CODEX_RUNNER_MANAGED_WORKSPACES_FILE?.trim() ||
+    path.join(process.cwd(), ".state", "managed-workspaces.json"),
+);
 
 const runs = new Map();
 const runByThreadId = new Map();
@@ -39,7 +50,65 @@ function parseWorkspaceMap() {
   );
 }
 
-const WORKSPACES = parseWorkspaceMap();
+const CONFIGURED_WORKSPACES = parseWorkspaceMap();
+
+function isSafeWorkspaceId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
+}
+
+function readManagedWorkspaceIds() {
+  if (!existsSync(MANAGED_WORKSPACES_FILE)) return new Set();
+  try {
+    const parsed = JSON.parse(readFileSync(MANAGED_WORKSPACES_FILE, "utf8"));
+    const ids = Array.isArray(parsed?.workspaceIds) ? parsed.workspaceIds : [];
+    return new Set(ids.filter(isSafeWorkspaceId));
+  } catch {
+    console.warn("[codex-runner] ignoring invalid managed workspace state");
+    return new Set();
+  }
+}
+
+const MANAGED_WORKSPACE_IDS = readManagedWorkspaceIds();
+const WORKSPACES = new Map(CONFIGURED_WORKSPACES);
+if (DEFAULT_CWD) {
+  for (const workspaceId of MANAGED_WORKSPACE_IDS) {
+    if (!WORKSPACES.has(workspaceId)) WORKSPACES.set(workspaceId, path.resolve(DEFAULT_CWD));
+  }
+}
+
+function persistManagedWorkspaceIds() {
+  const directory = path.dirname(MANAGED_WORKSPACES_FILE);
+  mkdirSync(directory, { recursive: true });
+  const temporaryPath = `${MANAGED_WORKSPACES_FILE}.${process.pid}.tmp`;
+  writeFileSync(
+    temporaryPath,
+    `${JSON.stringify({ version: 1, workspaceIds: [...MANAGED_WORKSPACE_IDS].sort() }, null, 2)}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+  renameSync(temporaryPath, MANAGED_WORKSPACES_FILE);
+}
+
+function attachDefaultWorkspace(workspaceId) {
+  if (!isSafeWorkspaceId(workspaceId)) throw new Error("Invalid project workspace id.");
+  if (CONFIGURED_WORKSPACES.has(workspaceId)) return;
+  if (!DEFAULT_CWD) {
+    throw new Error("No trusted default workspace is configured on the runner.");
+  }
+  const cwd = assertWorkspacePath(DEFAULT_CWD);
+  MANAGED_WORKSPACE_IDS.add(workspaceId);
+  WORKSPACES.set(workspaceId, cwd);
+  persistManagedWorkspaceIds();
+}
+
+function detachDefaultWorkspace(workspaceId) {
+  if (!isSafeWorkspaceId(workspaceId)) throw new Error("Invalid project workspace id.");
+  if (CONFIGURED_WORKSPACES.has(workspaceId)) {
+    throw new Error("This workspace is owned by CODEX_WORKSPACES_JSON and cannot be removed from the browser.");
+  }
+  MANAGED_WORKSPACE_IDS.delete(workspaceId);
+  WORKSPACES.delete(workspaceId);
+  persistManagedWorkspaceIds();
+}
 
 function assertWorkspacePath(cwd) {
   const resolved = path.resolve(cwd);
@@ -87,6 +156,14 @@ function authorize(req) {
 
 function ownerFrom(req, body) {
   return asString(req.headers["x-nodes-owner-id"]) || asString(body?.ownerId);
+}
+
+function hasAuthenticatedAccount(value) {
+  if (!value) return false;
+  if (isRecord(value) && Object.prototype.hasOwnProperty.call(value, "account")) {
+    return Boolean(value.account);
+  }
+  return true;
 }
 
 function getNested(value, keys) {
@@ -359,6 +436,89 @@ class CodexAppServer {
 
 const codex = new CodexAppServer();
 
+function activeRunCount() {
+  return [...runs.values()].filter(
+    (run) => !["completed", "failed", "cancelled"].includes(run.status),
+  ).length;
+}
+
+async function readControlStatus(workspaceId = null) {
+  const [account, tycho] = await Promise.all([
+    codex.proc ? codex.request("account/read", {}).catch(() => null) : null,
+    readTychoReadiness(),
+  ]);
+  const authenticated = hasAuthenticatedAccount(account);
+  return {
+    ok: true,
+    reachable: true,
+    controlAvailable: true,
+    codexRunning: Boolean(codex.proc),
+    authenticated,
+    model: MODEL,
+    activeRunCount: activeRunCount(),
+    workspaceCount: WORKSPACES.size,
+    workspaceIds: [...WORKSPACES.keys()],
+    hasDefaultWorkspace: Boolean(DEFAULT_CWD),
+    workspaceConfigured: Boolean(workspaceId && WORKSPACES.has(workspaceId)),
+    workspaceManaged: Boolean(workspaceId && MANAGED_WORKSPACE_IDS.has(workspaceId)),
+    tychoReady: tycho.tychoReady === true,
+    tychoRuntime: tycho.tychoRuntime ?? null,
+    tychoImage: tycho.tychoImage ?? null,
+    tychoStatus: tycho.tychoStatus ?? null,
+  };
+}
+
+async function controlRunner(body) {
+  const action = asString(body.action);
+  const workspaceId = asString(body.workspaceId);
+
+  if (action === "runtime.start") {
+    await codex.ensureStarted();
+    return { status: await readControlStatus(workspaceId) };
+  }
+  if (action === "runtime.stop") {
+    if (activeRunCount() > 0) throw new Error("Cancel active Codex runs before stopping the runtime.");
+    codex.stop();
+    return { status: await readControlStatus(workspaceId) };
+  }
+  if (action === "auth.login") {
+    await codex.ensureStarted();
+    const account = await codex.request("account/read", {}).catch(() => null);
+    if (hasAuthenticatedAccount(account)) {
+      return { status: await readControlStatus(workspaceId), login: null };
+    }
+    const login = await codex.request("account/login/start", { type: "chatgptDeviceCode" });
+    if (!isRecord(login) || asString(login.verificationUrl) === null || asString(login.userCode) === null) {
+      throw new Error("Codex did not return a device sign-in link.");
+    }
+    return {
+      status: await readControlStatus(workspaceId),
+      login: {
+        loginId: asString(login.loginId),
+        verificationUrl: asString(login.verificationUrl),
+        userCode: asString(login.userCode),
+      },
+    };
+  }
+  if (action === "auth.logout") {
+    await codex.ensureStarted();
+    await codex.request("account/logout", {});
+    return { status: await readControlStatus(workspaceId) };
+  }
+  if (action === "workspace.attach") {
+    attachDefaultWorkspace(workspaceId);
+    return { status: await readControlStatus(workspaceId) };
+  }
+  if (action === "workspace.detach") {
+    detachDefaultWorkspace(workspaceId);
+    return { status: await readControlStatus(workspaceId) };
+  }
+  if (action === "tycho.verify") {
+    return { status: await readControlStatus(workspaceId) };
+  }
+  throw new Error("Unsupported runner control action.");
+}
+
 async function readAccountUsage() {
   await codex.ensureStarted();
   const account = await codex.request("account/read", {});
@@ -445,7 +605,7 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         codexRunning: true,
         model: MODEL,
-        authenticated: Boolean(account),
+        authenticated: hasAuthenticatedAccount(account),
         workspaceCount: WORKSPACES.size,
         workspaceIds: [...WORKSPACES.keys()],
         hasDefaultWorkspace: Boolean(DEFAULT_CWD),
@@ -456,6 +616,18 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/v1/account/usage" && req.method === "GET") {
       const snapshot = await readAccountUsage();
       return json(res, 200, { ok: true, ...snapshot });
+    }
+
+    if (url.pathname === "/v1/control/status" && req.method === "GET") {
+      const workspaceId = asString(url.searchParams.get("workspaceId"));
+      return json(res, 200, await readControlStatus(workspaceId));
+    }
+
+    if (url.pathname === "/v1/control" && req.method === "POST") {
+      const body = await readJson(req);
+      const ownerId = ownerFrom(req, body);
+      if (!ownerId) return json(res, 400, { error: "Missing owner id." });
+      return json(res, 200, { ok: true, ...(await controlRunner(body)) });
     }
 
     if (req.method === "POST" && url.pathname === "/v1/runs") {

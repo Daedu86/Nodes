@@ -29,11 +29,10 @@ const nextStepWithTycho = (
 
   return {
     code: "configure_tycho",
-    title: "Prepare the Tycho isolated runtime",
+    title: "Verify Tycho isolation in Agent Work",
     detail:
       status.tycho.reason ??
-      "Tycho must report an isolated runtime as ready before this workload can run.",
-    command: "tycho-experiment --doctor",
+      "Use the Agent Work control plane to verify Docker/Finch isolation before this workload can run.",
   };
 };
 

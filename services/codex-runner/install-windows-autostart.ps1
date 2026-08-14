@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $RunnerDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RunnerSupervisor = Join-Path $RunnerDir "windows-runner.ps1"
 $NgrokSupervisor = Join-Path $RunnerDir "windows-ngrok.ps1"
+$UriHandler = Join-Path $RunnerDir "windows-control-uri.ps1"
 $EnvFile = Join-Path $RunnerDir ".env"
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
@@ -27,6 +28,10 @@ if (-not (Test-Path $EnvFile)) {
 
 if (-not (Test-Path $NgrokSupervisor)) {
   throw "Missing $NgrokSupervisor. Pull the latest repository changes first."
+}
+
+if (-not (Test-Path $UriHandler)) {
+  throw "Missing $UriHandler. Pull the latest repository changes first."
 }
 
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -50,9 +55,18 @@ function Register-NodesTask {
 Register-NodesTask -TaskName $RunnerTaskName -ScriptPath $RunnerSupervisor
 Register-NodesTask -TaskName $NgrokTaskName -ScriptPath $NgrokSupervisor
 
+$protocolRoot = "HKCU:\Software\Classes\nodes-runner"
+$protocolCommand = Join-Path $protocolRoot "shell\open\command"
+$handlerCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$UriHandler`" `"%1`""
+New-Item -Path $protocolCommand -Force | Out-Null
+Set-Item -Path $protocolRoot -Value "URL:Nodes AI Canvas Runner"
+New-ItemProperty -Path $protocolRoot -Name "URL Protocol" -Value "" -PropertyType String -Force | Out-Null
+Set-Item -Path $protocolCommand -Value $handlerCommand
+
 Write-Host "Installed and started '$RunnerTaskName'."
 Write-Host "Installed and started '$NgrokTaskName'."
 Write-Host "Both services will now start automatically when you sign in to Windows."
+Write-Host "Registered the nodes-runner:// launcher for Agent Work controls."
 Write-Host "Runner health: http://127.0.0.1:8787/healthz"
 Write-Host "ngrok inspect: http://127.0.0.1:4040/api/tunnels"
 Write-Host "Logs:          $RunnerDir\.logs"

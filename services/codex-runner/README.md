@@ -60,6 +60,8 @@ npm run autostart:install:windows
 
 This installs and immediately starts `Nodes AI Canvas Codex Runner`. After that it starts automatically when you sign in to Windows.
 
+The installer also registers the per-user `nodes-runner://` launcher. The **Agent Work → Runner control plane** switch uses it to start or stop the runner and ngrok scheduled tasks without opening a terminal. The browser may ask once for permission to open the installed launcher.
+
 The scheduled task launches `windows-runner.ps1`, which:
 
 - runs the runner in a hidden background process;
@@ -100,6 +102,8 @@ Or map multiple Nodes workspace/project ids:
 CODEX_WORKSPACES_JSON='{"project-a":"/srv/repos/project-a","project-b":"/srv/repos/project-b"}'
 ```
 
+When `CODEX_DEFAULT_CWD` is configured, Agent Work can attach a saved Nodes project id to that exact trusted directory. These UI-managed ids are persisted in `.state/managed-workspaces.json` by default (override with `CODEX_RUNNER_MANAGED_WORKSPACES_FILE`). The control API accepts only the project id; it never accepts or returns a filesystem path.
+
 When a child run is started manually with `parentRunId`, it inherits the parent's resolved workspace.
 
 ## Environment variables
@@ -120,6 +124,8 @@ When a child run is started manually with `parentRunId`, it inherits the parent'
 `GET /healthz` is an unauthenticated liveness probe and does not expose credentials. It reports the configured model along with runner status.
 
 `GET /readyz` requires the runner token when configured. It starts `codex app-server` if needed, calls `account/read` to verify that the local Codex runtime is responsive and has account state available, and reports the configured model.
+
+`GET /v1/control/status` is the non-starting Agent Work status probe. Authenticated `POST /v1/control` actions start or stop app-server, begin Codex device sign-in, log out, attach/detach a project to the trusted default workspace, or re-run Tycho readiness verification.
 
 ## Security
 
