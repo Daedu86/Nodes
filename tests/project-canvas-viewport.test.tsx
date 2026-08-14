@@ -22,9 +22,16 @@ vi.mock("@xyflow/react", async () => {
     Handle: () => null,
     MiniMap: () => null,
     Position: { Left: "left", Right: "right" },
-    ReactFlow: ({ children }: { children?: React.ReactNode }) => {
+    ReactFlow: ({
+      children,
+      fitView,
+    }: {
+      children?: React.ReactNode;
+      fitView?: boolean;
+    }) => {
       ReactModule.useEffect(() => {
         flowState.mounts += 1;
+        if (fitView) flowState.fitView();
         return () => {
           flowState.unmounts += 1;
         };

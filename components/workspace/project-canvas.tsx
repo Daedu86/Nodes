@@ -425,7 +425,6 @@ function ProjectCanvasInner({
     () => nodes.filter((node) => matchesCanvasFilter(node, canvasFilter)),
     [canvasFilter, nodes],
   );
-  const hasVisibleNodes = visibleNodes.length > 0;
 
   const visibleNodeIds = React.useMemo(
     () => new Set(visibleNodes.map((node) => node.id)),
@@ -435,17 +434,6 @@ function ProjectCanvasInner({
     () => edges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)),
     [edges, visibleNodeIds],
   );
-
-  React.useEffect(() => {
-    if (!hasVisibleNodes) return;
-    const timeout = window.setTimeout(() => {
-      void reactFlow.fitView({
-        duration: 250,
-        padding: 0.2,
-      });
-    }, 80);
-    return () => window.clearTimeout(timeout);
-  }, [canvasFilter, hasVisibleNodes, project.id, reactFlow]);
 
   const handleNodeClick = React.useCallback<NodeMouseHandler<ThreadGraphFlowNode>>(
     (_, node) => {
@@ -487,6 +475,13 @@ function ProjectCanvasInner({
     setLocalSelection(null);
     onSelectionChange?.(null);
   }, [onSelectionChange]);
+
+  const handleCanvasFilterChange = React.useCallback((filter: ProjectCanvasFilter) => {
+    setCanvasFilter(filter);
+    window.setTimeout(() => {
+      void reactFlow.fitView({ duration: 250, padding: 0.2 });
+    }, 60);
+  }, [reactFlow]);
 
   const handleResetView = React.useCallback(() => {
     setCanvasFilter("all");
@@ -573,7 +568,7 @@ function ProjectCanvasInner({
                     variant={canvasFilter === filter ? "default" : "outline"}
                     size="sm"
                     className="pointer-events-auto h-8 px-3"
-                    onClick={() => setCanvasFilter(filter)}
+                    onClick={() => handleCanvasFilterChange(filter)}
                   >
                     <Icon className="h-3.5 w-3.5" />
                     {meta.label}
