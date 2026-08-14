@@ -245,11 +245,6 @@ function ProjectCanvasInner({
   const [editorOpen, setEditorOpen] = React.useState(false);
   const [sessionToAttach, setSessionToAttach] = React.useState("");
   const [dependencyTargetId, setDependencyTargetId] = React.useState("");
-  const mapSignature = React.useMemo(
-    () => JSON.stringify(effectiveMap),
-    [effectiveMap],
-  );
-
   React.useEffect(() => {
     setCanvasFilter("all");
     setLocalSelection(null);
@@ -430,6 +425,7 @@ function ProjectCanvasInner({
     () => nodes.filter((node) => matchesCanvasFilter(node, canvasFilter)),
     [canvasFilter, nodes],
   );
+  const hasVisibleNodes = visibleNodes.length > 0;
 
   const visibleNodeIds = React.useMemo(
     () => new Set(visibleNodes.map((node) => node.id)),
@@ -441,7 +437,7 @@ function ProjectCanvasInner({
   );
 
   React.useEffect(() => {
-    if (visibleNodes.length === 0) return;
+    if (!hasVisibleNodes) return;
     const timeout = window.setTimeout(() => {
       void reactFlow.fitView({
         duration: 250,
@@ -449,7 +445,7 @@ function ProjectCanvasInner({
       });
     }, 80);
     return () => window.clearTimeout(timeout);
-  }, [canvasFilter, mapSignature, project.id, reactFlow, visibleNodes.length]);
+  }, [canvasFilter, hasVisibleNodes, project.id, reactFlow]);
 
   const handleNodeClick = React.useCallback<NodeMouseHandler<ThreadGraphFlowNode>>(
     (_, node) => {
@@ -767,7 +763,7 @@ function ProjectCanvasInner({
       ) : null}
 
       <ReactFlow
-        key={`${project.id}:${mapSignature}`}
+        key={project.id}
         nodes={visibleNodes}
         edges={visibleEdges}
         nodeTypes={nodeTypes}
