@@ -11,6 +11,7 @@ describe("agent runtime kernel", () => {
   it("ships core capabilities and can wrap provider starts through plugins", async () => {
     const kernel = createAgentRuntimeKernel();
     const events: string[] = [];
+    let startedPrompt: string | null = null;
     kernel.mount({
       id: "runtime-test-plugin",
       apply(context) {
@@ -21,8 +22,13 @@ describe("agent runtime kernel", () => {
           ...envelope,
           request: { prompt: `${envelope.request.prompt} + policy` },
         }));
-        context.on(AGENT_RUNTIME_EVENTS.started, () => {
+        context.on<{
+          runtime: string;
+          request: { prompt: string };
+          response: { runId: string; prompt: string };
+        }>(AGENT_RUNTIME_EVENTS.started, (event) => {
           events.push("started");
+          startedPrompt = event.request.prompt;
         });
       },
     });
@@ -37,6 +43,7 @@ describe("agent runtime kernel", () => {
     expect(kernel.has(AGENT_KERNEL_CAPABILITIES.tools)).toBe(true);
     expect(kernel.has(AGENT_KERNEL_CAPABILITIES.sessionLogFactory)).toBe(true);
     expect(result).toEqual({ runId: "run-1", prompt: "original + policy" });
+    expect(startedPrompt).toBe("original + policy");
     expect(events).toEqual(["started"]);
   });
 });
