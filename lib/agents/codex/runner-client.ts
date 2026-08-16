@@ -1,4 +1,4 @@
-import { createAuthoritativeWorkloadSection } from "@/lib/agents/kernel/request-assembly";
+import type { AgentPromptSection } from "@/lib/agents/kernel/request-assembly";
 import type {
   CodexApprovalDecision,
   CodexModelOption,
@@ -130,6 +130,10 @@ export type CodexRunnerLoginPrompt = {
 export type CodexRunnerControlResult = {
   login: CodexRunnerLoginPrompt | null;
   status: CodexRunnerControlStatus;
+};
+
+export type CodexRunKernelOptions = {
+  sections?: readonly AgentPromptSection[];
 };
 
 const asRunnerBody = async (response: Response) =>
@@ -353,6 +357,7 @@ async function startCodexRunDirect(
 
 export async function startCodexRun(
   input: CodexRunnerStartRequest,
+  kernelOptions: CodexRunKernelOptions = {},
 ): Promise<CodexRunnerStartResponse> {
   const workspacePaths = [...new Set(
     (input.workspaceFiles ?? []).map((file) => file.path.trim()).filter(Boolean),
@@ -369,7 +374,7 @@ export async function startCodexRun(
     approvalMode: input.approvalMode ?? null,
     workspacePaths,
     metadata: input.metadata,
-    sections: [createAuthoritativeWorkloadSection(workspacePaths)],
+    sections: kernelOptions.sections,
   });
   const request: CodexRunnerStartRequest = {
     ...input,
