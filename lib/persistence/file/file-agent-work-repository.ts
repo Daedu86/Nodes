@@ -77,6 +77,12 @@ const eventPath = (ownerId: string, eventId: string) => path.join(getEventDir(ow
 const sortByDateDesc = <T extends { createdAt: string }>(items: T[]) =>
   [...items].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+const sortEventsByDateDesc = (items: StoredAgentEvent[]) =>
+  [...items].sort((a, b) => {
+    const byDate = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    return byDate || a.id.localeCompare(b.id);
+  });
+
 export const fileAgentWorkRepository: AgentWorkRepository = {
   async getAgentToken(ownerId, tokenId) {
     const token = await safeReadJson<StoredAgentToken>(tokenPath(ownerId, tokenId));
@@ -171,7 +177,7 @@ export const fileAgentWorkRepository: AgentWorkRepository = {
       if (options.eventTypePrefix && !event.eventType.startsWith(options.eventTypePrefix)) continue;
       events.push(event);
     }
-    const sorted = sortByDateDesc(events);
+    const sorted = sortEventsByDateDesc(events);
     const limit = typeof options.limit === "number" ? Math.max(1, Math.min(1000, options.limit)) : 80;
     const offset = typeof options.offset === "number"
       ? Math.max(0, Math.trunc(options.offset))
