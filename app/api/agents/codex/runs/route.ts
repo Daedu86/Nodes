@@ -6,6 +6,7 @@ import {
   buildSessionWorkspaceFiles,
   hasTychoProtocolWorkspaceFile,
 } from "@/lib/agents/codex/session-workspace-files";
+import { createAuthoritativeWorkloadSection } from "@/lib/agents/kernel/request-assembly";
 import { normalizeProjectMap } from "@/lib/project-map";
 import { getProject } from "@/lib/project-store";
 import type { SessionArtifact } from "@/lib/session-artifacts";
@@ -186,6 +187,8 @@ export async function POST(req: Request) {
       reasoningEffort,
       approvalMode,
       workspaceFiles,
+    }, {
+      sections: [createAuthoritativeWorkloadSection(workspacePaths)],
     });
 
     await recordAgentEvent({
