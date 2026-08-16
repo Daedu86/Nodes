@@ -1,6 +1,6 @@
 # Agent kernel architecture
 
-Nodes owns a project/decision control plane and delegates execution to trusted runtimes such as Codex and NOOA. The agent kernel adds a provider-neutral extension layer between those two concerns without moving execution into the browser or weakening the existing sandbox boundaries.
+Nodes owns a project/decision control plane and delegates execution to trusted runtimes such as Codex and NOOA. The agent kernel adds a provider-neutral extension layer between those concerns without moving execution into the browser or weakening the existing sandbox boundaries.
 
 The design borrows the strongest general idea from modern agent harnesses: capabilities should be composable and replaceable instead of requiring edits to one privileged agent loop. Nodes keeps that idea deliberately smaller than the product-level Project Map, Arena, Tycho and M1–M8 learning stack.
 
@@ -16,7 +16,9 @@ Canvas / Project Map / Arena
        Agent kernel
    +--------+---------+
    | plugins/capabilities
+   | request assembly
    | runtime waterfalls
+   | lifecycle handles
    | tool registry
    | session event log
    | context compaction
@@ -46,69 +48,69 @@ The kernel is not an execution sandbox. Filesystem, network, subprocess and mode
 
 A plugin mount is transactional. If `apply()` throws, all registrations already made by that plugin are rolled back in reverse order. Unmounting a plugin reverses its registrations, and a provider cannot be unloaded while another mounted plugin declares a dependency on one of its capabilities.
 
-This is intentionally stricter than an ad-hoc global registry: extension state has an owner and a lifecycle.
+## 2. Request assembly
 
-## 2. Runtime start waterfall
+`AgentRequestAssembler` owns provider-neutral request composition. Global prompt sections may be registered on the kernel and request-scoped sections may shadow them by name. Assembly records a canonical header containing runtime, session/project identity, role, model, reasoning effort, approval/sandbox metadata, context capacity, authorized workspace paths, visible tool names and the ordered section names.
 
-`lib/agents/runtime/kernel.ts` defines the shared `runtime.start` waterfall plus `runtime.starting`, `runtime.started` and `runtime.start.failed` observations.
+The original human prompt stays separate from system/context material. `effectivePrompt` is the compatibility projection for runtimes that currently accept one prompt string.
 
-Both Codex and NOOA start operations now pass through this seam. With no plugin interceptors mounted, the waterfall is behaviorally transparent and calls the existing runner client exactly as before. Policy, telemetry or routing plugins can wrap either runtime without importing provider-specific start logic.
+Policy ownership remains explicit. For example, the Codex workload API contributes the server-authoritative workload section because that API owns the authorized artifact manifest; the generic Codex runner client does not silently impose that section on Evolution, M4 or other callers.
 
-A plugin may rewrite the start envelope before terminal dispatch. Lifecycle observations record the effective request that actually reaches the provider, keeping execution provenance aligned with what ran instead of only preserving the browser-origin request.
+## 3. Runtime start and lifecycle
 
-Cancellation, streaming, approvals and provider-specific control operations remain on their existing clients. They can move behind additional kernel seams incrementally when a concrete cross-provider consumer exists; the kernel does not require a flag-day migration.
+Both Codex and NOOA starts pass through the shared `runtime.start` waterfall. Lifecycle observations record the effective request that reaches the provider after interceptor rewrites.
 
-## 3. Tool runtime
+Post-start lifecycle is exposed through `AgentHandle`:
+
+- `cancel()`;
+- `openEventStream()`;
+- `resolveApproval()` when the provider supports approvals.
+
+Capabilities are declared by runtime. Codex currently exposes cancel, event streaming and approvals; NOOA exposes cancel and event streaming. Requesting an unsupported capability fails loudly with `UNSUPPORTED_CAPABILITY` instead of silently degrading.
+
+Provider-specific control-plane operations that are not common lifecycle semantics remain on their provider clients.
+
+## 4. Tool runtime
 
 `AgentToolRegistry` makes tool execution a first-class capability instead of provider-specific glue.
 
-Each tool declares:
+Each tool declares a stable name and description, input/output parsers, an execution function, optional cooperative timeout metadata and `parallel` or `exclusive` scheduling metadata.
 
-- a stable name and description;
-- an input parser and output parser;
-- an execution function;
-- optional cooperative timeout metadata;
-- `parallel` or `exclusive` scheduling metadata.
+After schema parsing, arguments and successful results cross a lossless-JSON boundary. Non-finite numbers, sparse arrays, circular values and non-plain objects such as `Date` are rejected. Accepted arguments are cloned and deeply frozen before guards or execution; accepted results are cloned before returning to consumers.
 
-The parser contract is only `parse(unknown)`, so Zod, Valibot or a custom validator can be used without coupling the kernel to one schema library.
+Guards are monotonic and fail closed. The registry returns typed errors for unknown tools, invalid arguments, denied calls, invalid output, cancellation and timeout.
 
-After schema parsing, arguments and successful results cross a second lossless-JSON boundary. Non-finite numbers, sparse arrays, circular values and non-plain objects such as `Date` are rejected. Accepted arguments are cloned and deeply frozen before guards or tool execution, so policy and execution observe one stable replayable value. Accepted results are cloned before returning to consumers.
-
-Guards run before execution and are monotonic: they may allow or deny a call, but a later tool implementation cannot override a denial. The registry validates output after execution and returns typed error classes for unknown tools, invalid arguments, denied calls, invalid output, cancellation and timeout.
-
-A timeout aborts the signal handed to the tool. Same-process code cannot be hard-killed, so tools that opt into a timeout must cooperate with `AbortSignal` and settle after cancellation.
-
-## 4. Event-sourced session surface
+## 5. Event-sourced session surface
 
 `AgentSessionLog` is an append-only typed event log. Model-visible history is derived from that log rather than maintained as a second mutable transcript.
 
-Surface events are:
+Surface events are `user.message`, `assistant.message` and `tool.result`. Durable non-surface facts include turn/step boundaries, canonical request snapshots, runtime-run bindings, tool calls and compaction records.
 
-- `user.message`;
-- `assistant.message`;
-- `tool.result`.
+Context replacement is append-only. A checkpoint names the exact visible range it shadows and records complete source-sequence provenance. `repairInterruptedTail()` closes an open persisted turn with an explicit `interrupted` outcome instead of truncating history.
 
-Other durable facts include turn/step boundaries, request snapshots, tool calls and compaction records.
+## 6. Durable execution journals
 
-Context replacement is also append-only. A checkpoint appends a new surface event with a `replace` operation naming a contiguous visible range. The event records the exact sequences it shadows, and replay rejects incomplete provenance. Old events remain available for audit, reconstruction and evidence.
+Every Codex or NOOA start creates a per-execution `journalId`. Before provider dispatch, Nodes durably writes:
 
-`repairInterruptedTail()` closes a persisted open turn with an explicit `interrupted` reason instead of deleting the partial history.
+1. the canonical request snapshot;
+2. the original human message; and
+3. a `runtime.run` record with status `requested`.
 
-## 5. Context compaction
+If that initial checkpoint cannot be stored, the provider is not started. This preserves the invariant that work presented as reproducible has a reconstructable initial request.
 
-`AgentContextCompactor` is deliberately provider-neutral. It receives two injected functions:
+`DurableAgentSessionJournal` persists kernel events through the existing `AgentWorkRepository`, so the same implementation works with the file and Supabase backends. Journal event ids are deterministic UUID-shaped hashes of `journalId + sequence`, making retries idempotent and compatible with the Supabase `agent_events.id` UUID column. Loading reconstructs `AgentSessionLog` from stored events and can repair an interrupted turn explicitly.
 
-- a token estimator;
-- a summarizer.
+The provider response is bound back to the journal with `runtime.run: started`; start failures are also recorded. Those post-dispatch writes are best-effort so a transient persistence failure cannot hide a provider run that already exists.
 
-When the current derived surface exceeds a configured threshold, it selects an old prefix while retaining a bounded recent tail, asks the summarizer for a checkpoint, and estimates the hypothetical post-compaction surface before committing anything. A checkpoint is rejected if it does not reduce estimated context.
+### Current durability boundary
 
-A successful compaction appends:
+Iteration 2 makes the initial request and provider-start binding durable. It does **not yet mirror every provider stream event** into the kernel session log. Codex/NOOA event streams remain the live source for assistant chunks, tool calls/results and completion events until a stream-to-session projector is added.
 
-1. one model-visible checkpoint that replaces the selected surface range; and
-2. one log-only `context.compaction` record containing source sequences and before/after token estimates.
+## 7. Context compaction
 
-This creates the provenance needed for later persistence, replay and evaluation without assuming a specific model tokenizer today.
+`AgentContextCompactor` is provider-neutral. It receives an injected token estimator and summarizer, selects an old prefix while retaining a bounded recent tail, verifies that the proposed checkpoint reduces estimated context, then appends a provenance-preserving replacement plus a log-only compaction record.
+
+It is not yet wired to provider-advertised context windows or production tokenizer/summarizer plugins.
 
 ## Core capabilities
 
@@ -117,30 +119,31 @@ The default runtime kernel currently provides:
 ```text
 agent.tools                -> AgentToolRegistry
 agent.session-log-factory  -> creates AgentSessionLog instances
+agent.request-assembler    -> AgentRequestAssembler
 ```
 
-Additional capabilities should be introduced only when a real consumer exists. Examples that fit this seam are model adapters, persistence backends, approval policy, sandbox policy, subagent providers and context estimators.
+Additional capabilities should be introduced when a real cross-provider consumer exists, rather than creating speculative seams.
 
 ## Security invariants
 
 The kernel must preserve these existing Nodes boundaries:
 
 - browser input never resolves arbitrary host filesystem paths;
+- caller-owned policy sections cannot be silently broadened by a generic runtime client;
 - plugins do not bypass OpenShell, trusted-runner or Tycho isolation;
 - a tool policy denial is fail-closed;
 - tool arguments and results admitted to the canonical boundary are lossless JSON;
 - runtime credentials stay outside candidate sandboxes and Kubernetes workloads;
 - model-visible checkpoints retain exact source-event provenance;
+- a provider start that claims reproducibility has a durable pre-dispatch request checkpoint;
 - learned M1–M8 components may choose actions, but empirical execution/evidence remains the promotion authority.
 
-## Migration strategy
+## Next migration steps
 
-This change is a foundation, not a rewrite of the existing runtimes.
+1. Project canonical Codex/NOOA stream events into the durable kernel journal so the complete run is replayable from one event source.
+2. Extend `AgentHandle` only when concrete cross-provider consumers need send/inject/status/wait-until-idle semantics.
+3. Connect provider/model context-window metadata, token estimators and summarizers to automatic compaction.
+4. Move reusable approval/sandbox/tool policy into scoped kernel capabilities while preserving runner enforcement boundaries.
+5. Add durable fork/resume APIs over journals once full stream projection is available.
 
-1. Keep Codex/NOOA adapters and canonical Canvas events stable.
-2. Extend kernel waterfalls to additional shared lifecycle operations only when cross-provider behavior needs them.
-3. Persist the kernel session log behind a repository interface before treating it as crash-recoverable production state.
-4. Move reusable tool policy and capability registration out of provider-specific code incrementally.
-5. Add tokenizer/provider-specific context estimators and summarizers as plugins rather than hard-coding them into the log.
-
-The Project Map, Arena, Tycho and M1–M8 remain above this layer. The kernel exists to make the execution substrate more replaceable; it does not replace Nodes' decision and learning model.
+The Project Map, Arena, Tycho and M1–M8 remain above this layer. The kernel exists to make the execution substrate reproducible and replaceable; it does not replace Nodes' decision and learning model.
