@@ -19,7 +19,7 @@ Canvas / Project Map / Arena
    | request assembly
    | runtime waterfalls
    | lifecycle handles
-   | stream projector
+   | runtime event ingestion
    | tool registry
    | session event log
    | context compaction
@@ -103,11 +103,13 @@ If that initial checkpoint cannot be stored, the provider is not started. This p
 
 The provider response is bound back to the journal with `runtime.run: started`; start failures are also recorded. Those post-dispatch writes are best-effort so a transient persistence failure cannot hide a provider run that already exists.
 
-### Runtime stream projection
+### Server-owned runtime event ingestion
 
-The Codex and NOOA event endpoints now wrap the live SSE stream with a provider-neutral journal projector while forwarding the original bytes unchanged to the client. The projector resolves the journal from the durable `runtime.run` binding, then appends one `runtime.event` for each accepted upstream event. Raw runtime records preserve upstream event id, type, source, runtime, provider timestamp/sequence when available, lineage fields and the lossless-JSON payload.
+Codex and NOOA can now push runtime events directly to Nodes through `/api/agents/runtime-events`, independently of whether a browser or another API consumer opens the live SSE stream. The callback is authenticated with the same per-runtime shared secret used to authenticate Nodes to the trusted runner. Nodes validates runtime, owner, session, project, journal and run identity before admitting the event.
 
-Codex envelopes are normalized through the existing Codex event mapper before projection; NOOA already emits the canonical runtime vocabulary and is admitted directly. Upstream event ids are used as replay identities so reconnect/backlog delivery can be deduplicated without duplicating model-visible history.
+The callback URL and `journalId` are placed in `metadata.nodesKernel` before provider dispatch. This avoids a start-response race: the runner already knows the durable journal identity when its first runtime event is emitted, rather than waiting for Nodes to receive the provider `runId` and discover the journal afterward.
+
+Each accepted event is normalized into the provider-neutral runtime vocabulary and appended as `runtime.event`. Raw runtime records preserve upstream event id, type, source, runtime, provider timestamp/sequence when available, lineage fields and the lossless-JSON payload. Codex envelopes reuse the existing Codex event mapper; NOOA already emits the canonical runtime vocabulary. Upstream event ids are replay identities, so callback retries and SSE backlog/reconnect delivery can be deduplicated.
 
 Where the canonical event contains enough semantics, the projector also derives typed session facts:
 
@@ -116,9 +118,19 @@ Where the canonical event contains enough semantics, the projector also derives 
 - tool start/completion can become `tool.call` and `tool.result` entries;
 - terminal runtime events append the final `runtime.run` state and close the turn as completed, failed or cancelled.
 
-Journal persistence is observational and must not corrupt the live control path: once a provider run exists, a projection write failure is logged but does not intentionally replace or truncate the upstream SSE response.
+### Single-writer ownership
 
-The remaining durability boundary is ownership of stream ingestion. Projection currently occurs when the runtime stream is consumed through the Nodes event endpoint. A reconnect can replay the runner backlog and deduplicate already persisted event ids, but a run that is never observed through that endpoint is not guaranteed to have every runtime event mirrored. A future server-owned ingestion/callback path is required before claiming stream durability that is fully independent of browser or API-stream consumers.
+A journal must not have two concurrent sequence allocators. Before dispatch, the initial `runtime.run` event therefore records `eventIngestion` as either `callback` or `stream`.
+
+Callback ownership is selected only when Nodes can resolve an HTTP(S) callback URL **and** the relevant runner shared secret is configured. For callback-owned runs, the SSE endpoint remains available as a live read transport but does not project the stream into the journal. For stream-owned or legacy runs, the SSE projector remains the compatibility fallback. This prevents callback and SSE from assigning competing journal sequences.
+
+The runner delivery queue is serialized by `journalId`, not by provider `runId`. That matters for Codex child runs, which inherit their parent's journal: parent and child events are delivered through one ordered writer instead of racing as independent run queues.
+
+Journal persistence remains observational with respect to the provider control path. Delivery failures are retried for network errors, HTTP 429 and server errors; a failed callback does not rewrite or truncate the provider stream.
+
+### Remaining durability boundary
+
+Server-owned ingestion removes the browser/SSE-consumer dependency, but the runner's callback queue is still in-memory. A runner process crash or host failure after an event is emitted but before its callback is acknowledged can still lose the unacknowledged tail. Strict crash durability requires a durable runner outbox or equivalent ACK/checkpoint protocol before events are considered delivered.
 
 ## 7. Context compaction
 
@@ -150,15 +162,18 @@ The kernel must preserve these existing Nodes boundaries:
 - runtime credentials stay outside candidate sandboxes and Kubernetes workloads;
 - model-visible checkpoints retain exact source-event provenance;
 - a provider start that claims reproducibility has a durable pre-dispatch request checkpoint;
-- reconnecting to a stream must not duplicate an already journaled upstream event;
+- runtime callbacks are authenticated and bound to the declared owner/session/project/journal identity;
+- each journal has one selected ingestion writer (`callback` or `stream`) for a run;
+- callback delivery for parent/child runs sharing a journal is serialized by journal identity;
+- upstream event ids make retries and reconnects idempotent at the projection boundary;
 - learned M1–M8 components may choose actions, but empirical execution/evidence remains the promotion authority.
 
 ## Next migration steps
 
-1. Move stream ingestion to a server-owned callback/worker path if complete runtime durability must be independent of an active event-stream consumer.
+1. Add a durable runner outbox/ACK checkpoint if runtime-event delivery must survive runner-process or host failure without losing an unacknowledged tail.
 2. Connect provider/model context-window metadata, token estimators and summarizers to automatic compaction.
 3. Move reusable approval/sandbox/tool policy into scoped kernel capabilities while preserving runner enforcement boundaries.
 4. Extend `AgentHandle` only when concrete cross-provider consumers need send/inject/status/wait-until-idle semantics.
-5. Add durable fork/resume APIs over journals once server-owned stream ingestion is available.
+5. Add durable fork/resume APIs over journals once the event-delivery durability contract is strong enough to support authoritative continuation.
 
 The Project Map, Arena, Tycho and M1–M8 remain above this layer. The kernel exists to make the execution substrate reproducible and replaceable; it does not replace Nodes' decision and learning model.
