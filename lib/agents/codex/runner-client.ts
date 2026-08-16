@@ -4,6 +4,7 @@ import type {
   CodexRunnerStartRequest,
   CodexRunnerStartResponse,
 } from "@/lib/agents/codex/types";
+import { runAgentRuntimeStartPipeline } from "@/lib/agents/runtime/kernel";
 
 const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, "");
 
@@ -312,7 +313,7 @@ export async function controlCodexRunner(
   };
 }
 
-export async function startCodexRun(
+async function startCodexRunDirect(
   input: CodexRunnerStartRequest,
 ): Promise<CodexRunnerStartResponse> {
   const response = await runnerFetch(input.ownerId, "/v1/runs", {
@@ -342,6 +343,12 @@ export async function startCodexRun(
         ? body.reasoningEffort
         : input.reasoningEffort ?? null,
   };
+}
+
+export async function startCodexRun(
+  input: CodexRunnerStartRequest,
+): Promise<CodexRunnerStartResponse> {
+  return runAgentRuntimeStartPipeline("codex", input, startCodexRunDirect);
 }
 
 export async function streamCodexRunEvents(
