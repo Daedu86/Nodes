@@ -52,9 +52,11 @@ This is intentionally stricter than an ad-hoc global registry: extension state h
 
 `lib/agents/runtime/kernel.ts` defines the shared `runtime.start` waterfall plus `runtime.starting`, `runtime.started` and `runtime.start.failed` observations.
 
-The NOOA runner client is the first production consumer. With no plugin interceptors mounted, the waterfall is behaviorally transparent and calls the existing runner client exactly as before. A future policy, telemetry or routing plugin can wrap the same start operation without importing NOOA-specific code.
+Both Codex and NOOA start operations now pass through this seam. With no plugin interceptors mounted, the waterfall is behaviorally transparent and calls the existing runner client exactly as before. Policy, telemetry or routing plugins can wrap either runtime without importing provider-specific start logic.
 
-Codex and future runtimes should converge on the same seam as their integration is touched; the kernel must not force a flag-day migration of provider clients.
+A plugin may rewrite the start envelope before terminal dispatch. Lifecycle observations record the effective request that actually reaches the provider, keeping execution provenance aligned with what ran instead of only preserving the browser-origin request.
+
+Cancellation, streaming, approvals and provider-specific control operations remain on their existing clients. They can move behind additional kernel seams incrementally when a concrete cross-provider consumer exists; the kernel does not require a flag-day migration.
 
 ## 3. Tool runtime
 
@@ -69,6 +71,8 @@ Each tool declares:
 - `parallel` or `exclusive` scheduling metadata.
 
 The parser contract is only `parse(unknown)`, so Zod, Valibot or a custom validator can be used without coupling the kernel to one schema library.
+
+After schema parsing, arguments and successful results cross a second lossless-JSON boundary. Non-finite numbers, sparse arrays, circular values and non-plain objects such as `Date` are rejected. Accepted arguments are cloned and deeply frozen before guards or tool execution, so policy and execution observe one stable replayable value. Accepted results are cloned before returning to consumers.
 
 Guards run before execution and are monotonic: they may allow or deny a call, but a later tool implementation cannot override a denial. The registry validates output after execution and returns typed error classes for unknown tools, invalid arguments, denied calls, invalid output, cancellation and timeout.
 
@@ -124,6 +128,7 @@ The kernel must preserve these existing Nodes boundaries:
 - browser input never resolves arbitrary host filesystem paths;
 - plugins do not bypass OpenShell, trusted-runner or Tycho isolation;
 - a tool policy denial is fail-closed;
+- tool arguments and results admitted to the canonical boundary are lossless JSON;
 - runtime credentials stay outside candidate sandboxes and Kubernetes workloads;
 - model-visible checkpoints retain exact source-event provenance;
 - learned M1–M8 components may choose actions, but empirical execution/evidence remains the promotion authority.
@@ -133,7 +138,7 @@ The kernel must preserve these existing Nodes boundaries:
 This change is a foundation, not a rewrite of the existing runtimes.
 
 1. Keep Codex/NOOA adapters and canonical Canvas events stable.
-2. Route provider lifecycle operations through kernel waterfalls when those clients are touched.
+2. Extend kernel waterfalls to additional shared lifecycle operations only when cross-provider behavior needs them.
 3. Persist the kernel session log behind a repository interface before treating it as crash-recoverable production state.
 4. Move reusable tool policy and capability registration out of provider-specific code incrementally.
 5. Add tokenizer/provider-specific context estimators and summarizers as plugins rather than hard-coding them into the log.
