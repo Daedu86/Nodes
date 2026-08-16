@@ -266,7 +266,9 @@ const pendingToolCalls = (log: AgentSessionLog) => {
   return pending;
 };
 
-const terminalReason = (type: AgentRuntimeEventType): AgentTurnEndReason | null => {
+const terminalReason = (
+  type: AgentRuntimeEventType,
+): Exclude<AgentTurnEndReason, "interrupted"> | null => {
   if (type === "run.completed") return "completed";
   if (type === "run.failed") return "failed";
   if (type === "run.cancelled") return "cancelled";
@@ -330,7 +332,7 @@ const appendSemanticProjection = (
     const turn = ensureOpenTurn(log);
     log.append("runtime.run", {
       runtime: event.runtime,
-      status: reason === "completed" ? "completed" : reason,
+      status: reason,
       runId: event.runId,
       ...(reason === "failed"
         ? { message: firstString(eventRecords(event), ["message", "error"]) ?? undefined }
