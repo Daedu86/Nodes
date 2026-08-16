@@ -182,7 +182,8 @@ export const supabaseAgentWorkRepository: AgentWorkRepository = {
       .from("agent_events")
       .select("*")
       .eq("owner_id", ownerId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true });
 
     if (options.tokenId) query = query.eq("token_id", options.tokenId);
     if (options.sessionId) query = query.eq("session_id", options.sessionId);
