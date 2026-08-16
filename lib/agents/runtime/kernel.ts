@@ -51,6 +51,10 @@ export function getAgentRuntimeKernel() {
  * Shared runtime-start seam. Plugins can observe or wrap a request without a
  * provider-specific import. In the absence of interceptors this is a no-op
  * around the existing runner client, preserving current behavior.
+ *
+ * The lifecycle events record the effective request that reaches the terminal
+ * provider after every waterfall rewrite. This keeps audit/provenance aligned
+ * with execution instead of accidentally recording the browser-origin request.
  */
 export async function runAgentRuntimeStartPipeline<TRequest, TResponse>(
   runtime: string,
@@ -59,20 +63,28 @@ export async function runAgentRuntimeStartPipeline<TRequest, TResponse>(
   kernel: AgentKernel = getAgentRuntimeKernel(),
 ): Promise<TResponse> {
   const envelope: AgentRuntimeStartEnvelope<TRequest> = { runtime, request };
+  let effectiveRequest = request;
   await kernel.emit(AGENT_RUNTIME_EVENTS.starting, envelope);
 
   try {
     const response = await kernel.runWaterfall<AgentRuntimeStartEnvelope<TRequest>, TResponse>(
       AGENT_RUNTIME_INTERCEPTORS.start,
       envelope,
-      (current) => terminal(current.request),
+      (current) => {
+        effectiveRequest = current.request;
+        return terminal(current.request);
+      },
     );
-    await kernel.emit(AGENT_RUNTIME_EVENTS.started, { runtime, request, response });
+    await kernel.emit(AGENT_RUNTIME_EVENTS.started, {
+      runtime,
+      request: effectiveRequest,
+      response,
+    });
     return response;
   } catch (error) {
     await kernel.emit(AGENT_RUNTIME_EVENTS.failed, {
       runtime,
-      request,
+      request: effectiveRequest,
       error: error instanceof Error ? error.message : String(error),
     });
     throw error;
