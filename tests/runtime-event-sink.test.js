@@ -1,3 +1,6 @@
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createRuntimeEventSink } from "../services/runtime-event-sink.mjs";
 
@@ -60,6 +63,53 @@ describe("runtime event sink", () => {
       sink.enqueue({ ...base, runId: "child" }, { id: "event-2" }),
     ]);
     expect(maxInFlight).toBe(1);
+  });
+
+  it("persists failed deliveries and replays them after runner restart", async () => {
+    const outboxDir = mkdtempSync(path.join(tmpdir(), "nodes-runtime-outbox-"));
+    const run = {
+      ownerId: "owner-1",
+      sessionId: "session-1",
+      projectId: "project-1",
+      journalId: "journal-1",
+      runId: "run-1",
+      eventSinkUrl: "https://nodes.example/api/agents/runtime-events",
+    };
+
+    try {
+      const failing = createRuntimeEventSink({
+        runtime: "codex",
+        runnerToken: "secret",
+        outboxDir,
+        fetchImpl: async () => {
+          throw new Error("callback offline");
+        },
+        retryDelaysMs: [0],
+      });
+
+      await expect(failing.enqueue(run, { id: "event-1", runId: "run-1" }))
+        .rejects.toThrow("callback offline");
+      expect(readdirSync(outboxDir).filter((name) => name.endsWith(".json"))).toHaveLength(1);
+
+      const replayFetch = vi.fn(async () => ({ ok: true, status: 201 }));
+      const recovered = createRuntimeEventSink({
+        runtime: "codex",
+        runnerToken: "secret",
+        outboxDir,
+        fetchImpl: replayFetch,
+        retryDelaysMs: [0],
+      });
+
+      await expect(recovered.recover()).resolves.toEqual({
+        attempted: 1,
+        delivered: 1,
+        failed: 0,
+      });
+      expect(replayFetch).toHaveBeenCalledTimes(1);
+      expect(readdirSync(outboxDir).filter((name) => name.endsWith(".json"))).toHaveLength(0);
+    } finally {
+      rmSync(outboxDir, { recursive: true, force: true });
+    }
   });
 
   it("retries retryable failures and stays disabled without a shared secret", async () => {
