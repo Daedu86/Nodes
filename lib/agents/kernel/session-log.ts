@@ -13,6 +13,7 @@ export type AgentTurnEndReason =
 export type AgentRuntimeJournalStatus =
   | "requested"
   | "started"
+  | "completed"
   | "failed"
   | "cancelled";
 
@@ -41,6 +42,18 @@ export type AgentSessionEventMap = {
     runId: string | null;
     providerRunId?: string | null;
     message?: string;
+  };
+  "runtime.event": {
+    runtime: string;
+    runId: string;
+    eventId: string;
+    eventType: string;
+    source?: string;
+    nodeId?: string;
+    parentRunId?: string | null;
+    providerSequence?: number;
+    providerCreatedAt?: string;
+    payload: AgentJsonValue;
   };
   "user.message": {
     messageId: string;

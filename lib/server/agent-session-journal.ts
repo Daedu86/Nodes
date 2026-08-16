@@ -50,12 +50,23 @@ const journalEventId = (journalId: string, sequence: number) => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
+const readStoredEnvelope = (
+  payload: Record<string, unknown>,
+): { journalId: string; event: AgentSessionEvent } | null => {
+  if (typeof payload.journalId !== "string" || !payload.journalId.trim()) return null;
+  if (!isRecord(payload.event)) return null;
+  return {
+    journalId: payload.journalId,
+    event: payload.event as AgentSessionEvent,
+  };
+};
+
 const readStoredEvent = (
   payload: Record<string, unknown>,
   journalId: string,
 ): AgentSessionEvent | null => {
-  if (payload.journalId !== journalId || !isRecord(payload.event)) return null;
-  return payload.event as AgentSessionEvent;
+  const stored = readStoredEnvelope(payload);
+  return stored?.journalId === journalId ? stored.event : null;
 };
 
 /**
@@ -171,4 +182,47 @@ export async function loadAgentSessionJournal(
     repository,
     log.latestSequence(),
   );
+}
+
+export async function findAgentSessionJournalForRun(input: {
+  ownerId: string;
+  runtime: string;
+  runId: string;
+  repository?: AgentWorkRepository;
+}): Promise<DurableAgentSessionJournal | null> {
+  const ownerId = nonEmpty(input.ownerId, "ownerId");
+  const runtime = nonEmpty(input.runtime, "runtime");
+  const runId = nonEmpty(input.runId, "runId");
+  const repository = input.repository ?? getAgentWorkRepository();
+
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const page = await repository.listAgentEvents(ownerId, {
+      eventType: `${SESSION_EVENT_PREFIX}runtime.run`,
+      limit: PAGE_SIZE,
+      offset,
+    });
+
+    for (const record of page) {
+      const stored = readStoredEnvelope(record.payload);
+      if (!stored || stored.event.type !== "runtime.run") continue;
+      if (
+        stored.event.data.runtime !== runtime ||
+        stored.event.data.runId !== runId ||
+        !record.sessionId
+      ) {
+        continue;
+      }
+      return loadAgentSessionJournal({
+        ownerId,
+        sessionId: record.sessionId,
+        projectId: record.projectId,
+        journalId: stored.journalId,
+        repository,
+      });
+    }
+
+    if (page.length < PAGE_SIZE) break;
+  }
+
+  return null;
 }

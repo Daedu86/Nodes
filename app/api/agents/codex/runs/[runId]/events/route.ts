@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAgentHandle } from "@/lib/agents/runtime/handle";
+import { createJournaledAgentEventStream } from "@/lib/server/agent-stream-journal";
 import { recordAgentEvent } from "@/lib/server/agent-work";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
 
@@ -52,10 +53,17 @@ export async function GET(
     headers.set("connection", "keep-alive");
     headers.delete("content-length");
 
-    return new Response(upstream.body, {
-      status: 200,
-      headers,
-    });
+    return new Response(
+      createJournaledAgentEventStream(upstream.body, {
+        ownerId: guarded.user.id,
+        runtime: "codex",
+        runId,
+      }),
+      {
+        status: 200,
+        headers,
+      },
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Codex event stream unavailable.";
     return NextResponse.json({ error: message }, { status: 503 });
