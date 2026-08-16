@@ -40,6 +40,7 @@ export type AgentSessionEventMap = {
     runtime: string;
     status: AgentRuntimeJournalStatus;
     runId: string | null;
+    eventIngestion?: "stream" | "callback";
     providerRunId?: string | null;
     message?: string;
   };

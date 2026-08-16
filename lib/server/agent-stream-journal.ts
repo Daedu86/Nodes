@@ -376,6 +376,13 @@ export async function createAgentStreamJournalProjector(input: {
 }) {
   const journal = await findAgentSessionJournalForRun(input);
   if (!journal) return null;
+  const callbackOwned = journal.log.events().some(
+    (event) =>
+      event.type === "runtime.run" &&
+      event.data.runtime === input.runtime &&
+      event.data.eventIngestion === "callback",
+  );
+  if (callbackOwned) return null;
   return {
     journalId: journal.identity.journalId,
     async projectValue(value: unknown) {

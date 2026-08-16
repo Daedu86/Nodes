@@ -6,7 +6,7 @@ import type {
   CodexRunnerStartResponse,
 } from "@/lib/agents/codex/types";
 import { runAgentRuntimeStartPipeline } from "@/lib/agents/runtime/kernel";
-import { getAgentRuntimeEventSinkUrl } from "@/lib/server/agent-runtime-event-sink-url";
+import { getAgentRuntimeEventSinkConfig } from "@/lib/server/agent-runtime-event-sink-url";
 import {
   prepareAgentRuntimeRequest,
   recordAgentRuntimeStartFailure,
@@ -363,6 +363,7 @@ export async function startCodexRun(
   const workspacePaths = [...new Set(
     (input.workspaceFiles ?? []).map((file) => file.path.trim()).filter(Boolean),
   )].sort();
+  const eventSink = getAgentRuntimeEventSinkConfig("codex");
   const prepared = await prepareAgentRuntimeRequest({
     runtime: "codex",
     ownerId: input.ownerId,
@@ -375,6 +376,7 @@ export async function startCodexRun(
     approvalMode: input.approvalMode ?? null,
     workspacePaths,
     metadata: input.metadata,
+    eventIngestion: eventSink.ingestion,
     sections: kernelOptions.sections,
   });
   const request: CodexRunnerStartRequest = {
@@ -385,7 +387,7 @@ export async function startCodexRun(
       nodesKernel: {
         assemblyId: prepared.assembly.header.assemblyId,
         journalId: prepared.journal.identity.journalId,
-        eventSinkUrl: getAgentRuntimeEventSinkUrl(),
+        eventSinkUrl: eventSink.url,
       },
     },
   };

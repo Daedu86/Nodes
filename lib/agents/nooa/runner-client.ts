@@ -1,5 +1,5 @@
 import { runAgentRuntimeStartPipeline } from "@/lib/agents/runtime/kernel";
-import { getAgentRuntimeEventSinkUrl } from "@/lib/server/agent-runtime-event-sink-url";
+import { getAgentRuntimeEventSinkConfig } from "@/lib/server/agent-runtime-event-sink-url";
 import type {
   AgentRuntimeRunStatus,
   AgentRuntimeStartRequest,
@@ -100,6 +100,7 @@ async function startNooaRunDirect(
 export async function startNooaRun(
   input: AgentRuntimeStartRequest,
 ): Promise<AgentRuntimeStartResponse> {
+  const eventSink = getAgentRuntimeEventSinkConfig("nooa");
   const prepared = await prepareAgentRuntimeRequest({
     runtime: "nooa",
     ownerId: input.ownerId,
@@ -109,6 +110,7 @@ export async function startNooaRun(
     prompt: input.run.prompt,
     sandboxPolicyId: input.run.sandbox?.policyId ?? null,
     metadata: input.run.metadata,
+    eventIngestion: eventSink.ingestion,
   });
   const request: AgentRuntimeStartRequest = {
     ...input,
@@ -120,7 +122,7 @@ export async function startNooaRun(
         nodesKernel: {
           assemblyId: prepared.assembly.header.assemblyId,
           journalId: prepared.journal.identity.journalId,
-          eventSinkUrl: getAgentRuntimeEventSinkUrl(),
+          eventSinkUrl: eventSink.url,
         },
       },
     },

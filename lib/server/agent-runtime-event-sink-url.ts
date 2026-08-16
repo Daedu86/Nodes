@@ -1,3 +1,5 @@
+import type { AgentRuntimeId } from "@/lib/agents/runtime/types";
+
 const EVENT_SINK_PATH = "/api/agents/runtime-events";
 
 const absoluteHttpUrl = (value: string) => {
@@ -27,4 +29,16 @@ export function getAgentRuntimeEventSinkUrl(): string | null {
   }
 
   return null;
+}
+
+const tokenForRuntime = (runtime: AgentRuntimeId) =>
+  (runtime === "codex" ? process.env.CODEX_RUNNER_TOKEN : process.env.NOOA_RUNNER_TOKEN)?.trim() || null;
+
+export function getAgentRuntimeEventSinkConfig(runtime: AgentRuntimeId) {
+  const url = getAgentRuntimeEventSinkUrl();
+  const enabled = Boolean(url && tokenForRuntime(runtime));
+  return {
+    url: enabled ? url : null,
+    ingestion: enabled ? "callback" as const : "stream" as const,
+  };
 }

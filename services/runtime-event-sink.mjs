@@ -76,19 +76,19 @@ export function createRuntimeEventSink({
   }
 
   function enqueue(run, event) {
-    const runId = asString(run?.runId) || "unknown";
-    const previous = queues.get(runId) ?? Promise.resolve(false);
+    const queueId = asString(run?.journalId) || asString(run?.runId) || "unknown";
+    const previous = queues.get(queueId) ?? Promise.resolve(false);
     const current = previous
       .catch(() => false)
       .then(() => deliver(run, event));
-    queues.set(runId, current);
+    queues.set(queueId, current);
     void current
       .catch((error) => {
         console.warn("[" + normalizedRuntime + "-runner] runtime event sink delivery failed", error);
         return false;
       })
       .finally(() => {
-        if (queues.get(runId) === current) queues.delete(runId);
+        if (queues.get(queueId) === current) queues.delete(queueId);
       });
     return current;
   }

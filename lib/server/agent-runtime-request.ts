@@ -23,6 +23,7 @@ export type PrepareAgentRuntimeRequestInput = {
   workspacePaths?: readonly string[];
   toolNames?: readonly string[];
   metadata?: Readonly<Record<string, unknown>>;
+  eventIngestion?: "stream" | "callback";
   sections?: readonly AgentPromptSection[];
 };
 
@@ -89,6 +90,7 @@ export async function prepareAgentRuntimeRequest(
     runtime: assembly.header.runtime,
     status: "requested",
     runId: null,
+    eventIngestion: input.eventIngestion,
   });
   await journal.flush();
 

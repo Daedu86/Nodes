@@ -66,7 +66,11 @@ const createMemoryRepository = (): AgentWorkRepository => {
   };
 };
 
-async function seedStartedRun(repository: AgentWorkRepository, runtime: "codex" | "nooa") {
+async function seedStartedRun(
+  repository: AgentWorkRepository,
+  runtime: "codex" | "nooa",
+  eventIngestion?: "stream" | "callback",
+) {
   const journal = createAgentSessionJournal({
     ownerId: "owner-1",
     sessionId: "session-1",
@@ -78,11 +82,24 @@ async function seedStartedRun(repository: AgentWorkRepository, runtime: "codex" 
     runtime,
     status: "started",
     runId: "run-1",
+    eventIngestion,
   });
   await journal.flush();
 }
 
 describe("agent stream journal projection", () => {
+  it("keeps SSE read-only when the journal is callback-owned", async () => {
+    const repository = createMemoryRepository();
+    await seedStartedRun(repository, "nooa", "callback");
+    const projector = await createAgentStreamJournalProjector({
+      ownerId: "owner-1",
+      runtime: "nooa",
+      runId: "run-1",
+      repository,
+    });
+    expect(projector).toBeNull();
+  });
+
   it("projects NOOA lifecycle into one durable replay log and deduplicates reconnects", async () => {
     const repository = createMemoryRepository();
     await seedStartedRun(repository, "nooa");

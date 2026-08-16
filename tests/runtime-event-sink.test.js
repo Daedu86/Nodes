@@ -33,6 +33,35 @@ describe("runtime event sink", () => {
     });
   });
 
+  it("serializes parent and child deliveries that share one journal", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const fetchImpl = vi.fn(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return { ok: true, status: 201 };
+    });
+    const sink = createRuntimeEventSink({
+      runtime: "codex",
+      runnerToken: "secret",
+      fetchImpl,
+      retryDelaysMs: [0],
+    });
+    const base = {
+      ownerId: "owner-1",
+      sessionId: "session-1",
+      journalId: "journal-1",
+      eventSinkUrl: "https://nodes.example/api/agents/runtime-events",
+    };
+    await Promise.all([
+      sink.enqueue({ ...base, runId: "parent" }, { id: "event-1" }),
+      sink.enqueue({ ...base, runId: "child" }, { id: "event-2" }),
+    ]);
+    expect(maxInFlight).toBe(1);
+  });
+
   it("retries retryable failures and stays disabled without a shared secret", async () => {
     const retryingFetch = vi
       .fn()
