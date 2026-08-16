@@ -29,6 +29,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Plain-text applicator keeps transfer and validation deterministic.
           node --check scripts/harden-runtime-event-ingestion.cjs
           node scripts/harden-runtime-event-ingestion.cjs
 
