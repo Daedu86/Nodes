@@ -95,12 +95,70 @@ const cancellationError = (signal: AbortSignal) => {
   );
 };
 
+const assertLosslessJsonValue = (
+  value: unknown,
+  path: string,
+  ancestors: Set<object>,
+): void => {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new Error(`${path} contains a non-finite number.`);
+    }
+    return;
+  }
+  if (typeof value !== "object") {
+    throw new Error(`${path} contains a non-JSON ${typeof value} value.`);
+  }
+  if (ancestors.has(value)) {
+    throw new Error(`${path} contains a circular reference.`);
+  }
+
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      for (let index = 0; index < value.length; index += 1) {
+        if (!(index in value)) {
+          throw new Error(`${path}[${index}] is a sparse array slot.`);
+        }
+        assertLosslessJsonValue(value[index], `${path}[${index}]`, ancestors);
+      }
+      return;
+    }
+
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error(`${path} contains a non-plain object.`);
+    }
+    for (const [key, entry] of Object.entries(value)) {
+      assertLosslessJsonValue(entry, `${path}.${key}`, ancestors);
+    }
+  } finally {
+    ancestors.delete(value);
+  }
+};
+
+const deepFreezeJson = (value: unknown): unknown => {
+  if (!value || typeof value !== "object") return value;
+  for (const child of Array.isArray(value) ? value : Object.values(value)) {
+    deepFreezeJson(child);
+  }
+  return Object.freeze(value);
+};
+
+const snapshotLosslessJson = (value: unknown, path: string): unknown => {
+  assertLosslessJsonValue(value, path, new Set());
+  return deepFreezeJson(structuredClone(value));
+};
+
 /**
  * Provider-neutral tool registry with validation, monotonic guards, cooperative
  * cancellation and execution-mode metadata.
  *
  * Schemas only need a `parse(unknown)` method, so Zod, Valibot or a custom
  * validator can be used without coupling the kernel to a validation library.
+ * Parsed arguments and results additionally cross a lossless-JSON boundary:
+ * they are snapshotted and frozen before policy/execution or replay exposure.
  */
 export class AgentToolRegistry {
   private readonly tools = new Map<string, RegisteredTool>();
@@ -166,7 +224,8 @@ export class AgentToolRegistry {
 
     let args: unknown;
     try {
-      args = registered.definition.input.parse(input.arguments);
+      const parsed = registered.definition.input.parse(input.arguments);
+      args = snapshotLosslessJson(parsed, `Agent tool '${name}' arguments`);
     } catch (error) {
       throw new AgentToolError(
         "INVALID_ARGS",
@@ -213,7 +272,8 @@ export class AgentToolRegistry {
 
       let value: unknown;
       try {
-        value = registered.definition.output.parse(rawResult);
+        const parsed = registered.definition.output.parse(rawResult);
+        value = snapshotLosslessJson(parsed, `Agent tool '${name}' result`);
       } catch (error) {
         throw new AgentToolError(
           "INVALID_OUTPUT",
