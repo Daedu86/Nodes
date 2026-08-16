@@ -20,6 +20,7 @@ Canvas / Project Map / Arena
    | runtime waterfalls
    | lifecycle handles
    | runtime event ingestion
+   | durable runner outbox
    | tool registry
    | session event log
    | context compaction
@@ -105,7 +106,7 @@ The provider response is bound back to the journal with `runtime.run: started`; 
 
 ### Server-owned runtime event ingestion
 
-Codex and NOOA can now push runtime events directly to Nodes through `/api/agents/runtime-events`, independently of whether a browser or another API consumer opens the live SSE stream. The callback is authenticated with the same per-runtime shared secret used to authenticate Nodes to the trusted runner. Nodes validates runtime, owner, session, project, journal and run identity before admitting the event.
+Codex and NOOA can push runtime events directly to Nodes through `/api/agents/runtime-events`, independently of whether a browser or another API consumer opens the live SSE stream. The callback is authenticated with the same per-runtime shared secret used to authenticate Nodes to the trusted runner. Nodes validates runtime, owner, session, project, journal and run identity before admitting the event.
 
 The callback URL and `journalId` are placed in `metadata.nodesKernel` before provider dispatch. This avoids a start-response race: the runner already knows the durable journal identity when its first runtime event is emitted, rather than waiting for Nodes to receive the provider `runId` and discover the journal afterward.
 
@@ -126,11 +127,17 @@ Callback ownership is selected only when Nodes can resolve an HTTP(S) callback U
 
 The runner delivery queue is serialized by `journalId`, not by provider `runId`. That matters for Codex child runs, which inherit their parent's journal: parent and child events are delivered through one ordered writer instead of racing as independent run queues.
 
-Journal persistence remains observational with respect to the provider control path. Delivery failures are retried for network errors, HTTP 429 and server errors; a failed callback does not rewrite or truncate the provider stream.
+### Durable runner outbox
+
+Callback-owned runners now place each event in a disk outbox before forwarding it to live SSE subscribers. The stable outbox filename is derived from runtime, journal id and upstream event id, so retrying the same event reuses one pending record. Writes use a temporary file plus atomic rename; newly created outbox directories use mode `0700` and event files use mode `0600`. Runner credentials are never stored in an outbox record.
+
+The callback entry is deleted only after Nodes acknowledges it with a successful HTTP response. Network failures, HTTP 429 and server errors are retried in-process; if delivery is still unsuccessful, the file remains pending. On runner startup, `recover()` scans the durable outbox, validates stored entries, orders them by original queue time/ordinal and resubmits them through the same per-journal serialization queue. Because the Nodes projection boundary deduplicates by upstream event id, a crash after server ACK but before local deletion safely produces an idempotent replay rather than duplicate model-visible history.
+
+Codex defaults its outbox beside `CODEX_RUNNER_MANAGED_WORKSPACES_FILE` under `.state/runtime-event-outbox`. NOOA defaults under `NOOA_RUNNER_HOME/runtime-event-outbox`. `CODEX_RUNNER_EVENT_OUTBOX_DIR` and `NOOA_RUNNER_EVENT_OUTBOX_DIR` can override those locations. If a runner may be recreated on another host, the configured outbox directory must be backed by persistent storage for host-level recovery.
 
 ### Remaining durability boundary
 
-Server-owned ingestion removes the browser/SSE-consumer dependency, but the runner's callback queue is still in-memory. A runner process crash or host failure after an event is emitted but before its callback is acknowledged can still lose the unacknowledged tail. Strict crash durability requires a durable runner outbox or equivalent ACK/checkpoint protocol before events are considered delivered.
+The current outbox is process-restart durable when its underlying filesystem survives the restart. It does not make an ephemeral host filesystem durable across host replacement, and the atomic write/rename protocol is not a database transaction with the provider's own event source. Environments that require power-loss-grade or cross-host exactly-once transport should place the outbox on durable storage and can later add fsync/ACK checkpointing or a transactional message broker. Nodes already treats replay as at-least-once and idempotent at the journal projection boundary.
 
 ## 7. Context compaction
 
@@ -165,15 +172,16 @@ The kernel must preserve these existing Nodes boundaries:
 - runtime callbacks are authenticated and bound to the declared owner/session/project/journal identity;
 - each journal has one selected ingestion writer (`callback` or `stream`) for a run;
 - callback delivery for parent/child runs sharing a journal is serialized by journal identity;
+- pending callback events are persisted without runner credentials before live SSE delivery when callback ingestion is active;
 - upstream event ids make retries and reconnects idempotent at the projection boundary;
 - learned M1–M8 components may choose actions, but empirical execution/evidence remains the promotion authority.
 
 ## Next migration steps
 
-1. Add a durable runner outbox/ACK checkpoint if runtime-event delivery must survive runner-process or host failure without losing an unacknowledged tail.
-2. Connect provider/model context-window metadata, token estimators and summarizers to automatic compaction.
-3. Move reusable approval/sandbox/tool policy into scoped kernel capabilities while preserving runner enforcement boundaries.
-4. Extend `AgentHandle` only when concrete cross-provider consumers need send/inject/status/wait-until-idle semantics.
-5. Add durable fork/resume APIs over journals once the event-delivery durability contract is strong enough to support authoritative continuation.
+1. Connect provider/model context-window metadata, token estimators and summarizers to automatic compaction.
+2. Move reusable approval/sandbox/tool policy into scoped kernel capabilities while preserving runner enforcement boundaries.
+3. Extend `AgentHandle` only when concrete cross-provider consumers need send/inject/status/wait-until-idle semantics.
+4. Add durable fork/resume APIs over journals once continuation semantics are defined for provider threads and child-run lineage.
+5. If deployment requirements demand power-loss-grade or cross-host delivery guarantees, add fsync/ACK checkpointing or a durable broker behind the outbox seam.
 
 The Project Map, Arena, Tycho and M1–M8 remain above this layer. The kernel exists to make the execution substrate reproducible and replaceable; it does not replace Nodes' decision and learning model.
