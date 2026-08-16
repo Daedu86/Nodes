@@ -18,6 +18,7 @@ import {
   resolveOpenShellPolicy,
   resolveWorkspace,
 } from "./runtime.mjs";
+import { createRuntimeEventSink } from "../runtime-event-sink.mjs";
 
 const SERVICE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.NOOA_RUNNER_PORT || 8788);
@@ -41,6 +42,7 @@ const WORKER_PATH = path.resolve(process.env.NOOA_WORKER_PATH || path.join(SERVI
 const WORKSPACES = parseWorkspaceMap(process.env.NOOA_WORKSPACES_JSON);
 const POLICIES = parseOpenShellPolicyMap(process.env.NOOA_OPENSHELL_POLICIES_JSON, DEFAULT_IMAGE);
 const runs = new Map();
+const runtimeEventSink = createRuntimeEventSink({ runtime: "nooa", runnerToken: RUNNER_TOKEN });
 
 const terminalStatuses = new Set(["completed", "failed", "cancelled"]);
 
@@ -110,16 +112,19 @@ function publish(run, type, source, payload = {}) {
     run.events.splice(0, run.events.length - MAX_EVENT_BACKLOG);
   }
   for (const subscriber of run.subscribers) writeSse(subscriber, event);
+  void runtimeEventSink.enqueue(run, event);
   return event;
 }
 
-function makeRunRecord({ runId, ownerId, input, workspace, policy, inputPath }) {
+function makeRunRecord({ runId, ownerId, input, workspace, policy, inputPath, kernel }) {
   return {
     runId,
     ownerId,
     nodeId: input.nodeId,
     sessionId: input.sessionId,
     projectId: input.projectId,
+    journalId: kernel.journalId,
+    eventSinkUrl: kernel.eventSinkUrl,
     workspaceId: workspace?.workspaceId || null,
     parentRunId: input.parentRunId,
     role: input.role,
@@ -288,6 +293,9 @@ async function startRun(body, ownerId) {
   if (activeRunCount() >= MAX_CONCURRENT_RUNS) {
     throw new Error(`NOOA runner is at its ${MAX_CONCURRENT_RUNS}-run concurrency limit.`);
   }
+  const rawRun = isRecord(body.run) ? body.run : {};
+  const rawMetadata = isRecord(rawRun.metadata) ? rawRun.metadata : {};
+  const nodesKernel = isRecord(rawMetadata.nodesKernel) ? rawMetadata.nodesKernel : {};
   const input = normalizeNooaRun(body.run);
   const workspace = resolveWorkspace(input, WORKSPACES, DEFAULT_CWD);
   const policy = resolveOpenShellPolicy(input.sandbox.policyId, POLICIES);
@@ -295,7 +303,13 @@ async function startRun(body, ownerId) {
   mkdirSync(RUNS_DIR, { recursive: true, mode: 0o700 });
   const inputDirectory = mkdtempSync(path.join(RUNS_DIR, "run-"));
   const inputPath = path.join(inputDirectory, "run.json");
-  const run = makeRunRecord({ runId, ownerId, input, workspace, policy, inputPath });
+  const run = makeRunRecord({
+    runId, ownerId, input, workspace, policy, inputPath,
+    kernel: {
+      journalId: asString(nodesKernel.journalId),
+      eventSinkUrl: asString(nodesKernel.eventSinkUrl),
+    },
+  });
   runs.set(runId, run);
   publish(run, "run.queued", "runtime", { policyId: policy.id });
 

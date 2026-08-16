@@ -6,6 +6,7 @@ import type {
   CodexRunnerStartResponse,
 } from "@/lib/agents/codex/types";
 import { runAgentRuntimeStartPipeline } from "@/lib/agents/runtime/kernel";
+import { getAgentRuntimeEventSinkUrl } from "@/lib/server/agent-runtime-event-sink-url";
 import {
   prepareAgentRuntimeRequest,
   recordAgentRuntimeStartFailure,
@@ -384,6 +385,7 @@ export async function startCodexRun(
       nodesKernel: {
         assemblyId: prepared.assembly.header.assemblyId,
         journalId: prepared.journal.identity.journalId,
+        eventSinkUrl: getAgentRuntimeEventSinkUrl(),
       },
     },
   };

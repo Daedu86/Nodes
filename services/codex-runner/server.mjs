@@ -13,6 +13,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { readTychoReadiness } from "./tycho-readiness.mjs";
 import { materializeWorkspaceFiles } from "./workspace-artifacts.mjs";
+import { createRuntimeEventSink } from "../runtime-event-sink.mjs";
 
 const PORT = Number(process.env.CODEX_RUNNER_PORT || 8787);
 const HOST = process.env.CODEX_RUNNER_HOST || "127.0.0.1";
@@ -33,6 +34,7 @@ const runs = new Map();
 const runByThreadId = new Map();
 const runByTurnId = new Map();
 const approvals = new Map();
+const runtimeEventSink = createRuntimeEventSink({ runtime: "codex", runnerToken: RUNNER_TOKEN });
 
 const isRecord = (value) => value && typeof value === "object" && !Array.isArray(value);
 const asString = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
@@ -228,6 +230,7 @@ function publish(run, notification) {
   run.events.push(envelope);
   if (run.events.length > MAX_EVENT_BACKLOG) run.events.splice(0, run.events.length - MAX_EVENT_BACKLOG);
   for (const subscriber of run.subscribers) writeSse(subscriber, envelope);
+  void runtimeEventSink.enqueue(run, envelope);
   return envelope;
 }
 
@@ -248,6 +251,8 @@ function makeRunRecord(input) {
     parentRunId: input.parentRunId || null,
     sessionId: input.sessionId || null,
     projectId: input.projectId || null,
+    journalId: input.journalId || null,
+    eventSinkUrl: input.eventSinkUrl || null,
     workspaceId: input.workspaceId || null,
     cwd: input.cwd || null,
     role: input.role || "coder",
@@ -281,6 +286,8 @@ function spawnChildRun(parentRun, params) {
     parentRunId: parentRun.runId,
     sessionId: parentRun.sessionId,
     projectId: parentRun.projectId,
+    journalId: parentRun.journalId,
+    eventSinkUrl: parentRun.eventSinkUrl,
     workspaceId: parentRun.workspaceId,
     cwd: parentRun.cwd,
     role: "custom",
@@ -550,7 +557,7 @@ async function startRun(body, ownerId) {
   }
 
   const runId = randomUUID();
-  const run = registerRun(makeRunRecord({ runId, agentId: asString(body.agentId) || `codex-${runId.slice(0, 8)}`, ownerId, parentRunId, sessionId: asString(body.sessionId), projectId: asString(body.projectId), workspaceId: workspace.workspaceId, cwd: workspace.cwd, role: asString(body.role) || "coder", label: asString(body.label) || (parentRun ? "Codex Subagent" : "Codex Agent"), approvalMode, workspaceArtifactPaths: workspaceArtifacts.paths }));
+  const run = registerRun(makeRunRecord({ runId, agentId: asString(body.agentId) || `codex-${runId.slice(0, 8)}`, ownerId, parentRunId, sessionId: asString(body.sessionId), projectId: asString(body.projectId), journalId: getNestedString(body, ["metadata", "nodesKernel", "journalId"]), eventSinkUrl: getNestedString(body, ["metadata", "nodesKernel", "eventSinkUrl"]), workspaceId: workspace.workspaceId, cwd: workspace.cwd, role: asString(body.role) || "coder", label: asString(body.label) || (parentRun ? "Codex Subagent" : "Codex Agent"), approvalMode, workspaceArtifactPaths: workspaceArtifacts.paths }));
   try {
     const threadParams = { cwd: workspace.cwd, model: MODEL };
     if (approvalMode === "tycho-isolated") {
