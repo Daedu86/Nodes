@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { cancelCodexRun } from "@/lib/agents/codex/runner-client";
+import { getAgentHandle } from "@/lib/agents/runtime/handle";
 import { recordAgentEvent } from "@/lib/server/agent-work";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
 
@@ -20,8 +20,10 @@ export async function POST(
   }
 
   try {
-    const upstream = await cancelCodexRun(guarded.user.id, runId);
-    const payload = await upstream.json().catch(() => ({ runId, status: "cancelled" }));
+    const payload = await getAgentHandle("codex", {
+      ownerId: guarded.user.id,
+      runId,
+    }).cancel();
 
     await recordAgentEvent({
       actor: {

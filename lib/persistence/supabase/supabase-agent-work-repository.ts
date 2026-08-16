@@ -175,12 +175,14 @@ export const supabaseAgentWorkRepository: AgentWorkRepository = {
     requireOwnerId(ownerId);
     const client = getSupabasePersistenceClient();
     const limit = typeof options.limit === "number" ? Math.max(1, Math.min(1000, options.limit)) : 80;
+    const offset = typeof options.offset === "number"
+      ? Math.max(0, Math.trunc(options.offset))
+      : 0;
     let query = client
       .from("agent_events")
       .select("*")
       .eq("owner_id", ownerId)
-      .order("created_at", { ascending: false })
-      .limit(limit);
+      .order("created_at", { ascending: false });
 
     if (options.tokenId) query = query.eq("token_id", options.tokenId);
     if (options.sessionId) query = query.eq("session_id", options.sessionId);
@@ -188,7 +190,7 @@ export const supabaseAgentWorkRepository: AgentWorkRepository = {
     if (options.eventType) query = query.eq("event_type", options.eventType);
     if (options.eventTypePrefix) query = query.like("event_type", `${options.eventTypePrefix}%`);
 
-    const { data, error } = await query;
+    const { data, error } = await query.range(offset, offset + limit - 1);
     const rows = ensureData(data, error, "Failed to list agent events") as AgentEventRow[];
     return rows.map(toEventRecord);
   },

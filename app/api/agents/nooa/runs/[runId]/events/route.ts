@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { streamNooaRunEvents } from "@/lib/agents/nooa/runner-client";
+import { getAgentHandle } from "@/lib/agents/runtime/handle";
 import { recordAgentEvent } from "@/lib/server/agent-work";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
 
@@ -19,7 +19,10 @@ export async function GET(
   const afterEventId = new URL(req.url).searchParams.get("after")?.trim() || null;
 
   try {
-    const upstream = await streamNooaRunEvents(guarded.user.id, runId, afterEventId);
+    const upstream = await getAgentHandle("nooa", {
+      ownerId: guarded.user.id,
+      runId,
+    }).openEventStream(afterEventId);
     if (!upstream.ok || !upstream.body) {
       const message = await upstream.text().catch(() => "NOOA event stream unavailable.");
       return NextResponse.json(

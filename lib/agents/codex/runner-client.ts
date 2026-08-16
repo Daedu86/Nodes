@@ -1,3 +1,4 @@
+import { createAuthoritativeWorkloadSection } from "@/lib/agents/kernel/request-assembly";
 import type {
   CodexApprovalDecision,
   CodexModelOption,
@@ -5,6 +6,11 @@ import type {
   CodexRunnerStartResponse,
 } from "@/lib/agents/codex/types";
 import { runAgentRuntimeStartPipeline } from "@/lib/agents/runtime/kernel";
+import {
+  prepareAgentRuntimeRequest,
+  recordAgentRuntimeStartFailure,
+  recordAgentRuntimeStartSuccess,
+} from "@/lib/server/agent-runtime-request";
 
 const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, "");
 
@@ -348,7 +354,54 @@ async function startCodexRunDirect(
 export async function startCodexRun(
   input: CodexRunnerStartRequest,
 ): Promise<CodexRunnerStartResponse> {
-  return runAgentRuntimeStartPipeline("codex", input, startCodexRunDirect);
+  const workspacePaths = [...new Set(
+    (input.workspaceFiles ?? []).map((file) => file.path.trim()).filter(Boolean),
+  )].sort();
+  const prepared = await prepareAgentRuntimeRequest({
+    runtime: "codex",
+    ownerId: input.ownerId,
+    sessionId: input.sessionId,
+    projectId: input.projectId,
+    role: input.role ?? null,
+    prompt: input.prompt,
+    model: input.model ?? null,
+    reasoningEffort: input.reasoningEffort ?? null,
+    approvalMode: input.approvalMode ?? null,
+    workspacePaths,
+    metadata: input.metadata,
+    sections: [createAuthoritativeWorkloadSection(workspacePaths)],
+  });
+  const request: CodexRunnerStartRequest = {
+    ...input,
+    prompt: prepared.assembly.effectivePrompt,
+    metadata: {
+      ...input.metadata,
+      nodesKernel: {
+        assemblyId: prepared.assembly.header.assemblyId,
+        journalId: prepared.journal.identity.journalId,
+      },
+    },
+  };
+
+  try {
+    const response = await runAgentRuntimeStartPipeline(
+      "codex",
+      request,
+      startCodexRunDirect,
+    );
+    await recordAgentRuntimeStartSuccess(prepared.journal, {
+      runtime: "codex",
+      runId: response.runId,
+      providerRunId: response.runId,
+    });
+    return response;
+  } catch (error) {
+    await recordAgentRuntimeStartFailure(prepared.journal, {
+      runtime: "codex",
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }
 
 export async function streamCodexRunEvents(

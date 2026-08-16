@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { streamCodexRunEvents } from "@/lib/agents/codex/runner-client";
+import { getAgentHandle } from "@/lib/agents/runtime/handle";
 import { recordAgentEvent } from "@/lib/server/agent-work";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
 
@@ -22,7 +22,10 @@ export async function GET(
   const afterEventId = url.searchParams.get("after")?.trim() || null;
 
   try {
-    const upstream = await streamCodexRunEvents(guarded.user.id, runId, afterEventId);
+    const upstream = await getAgentHandle("codex", {
+      ownerId: guarded.user.id,
+      runId,
+    }).openEventStream(afterEventId);
     if (!upstream.ok || !upstream.body) {
       const message = await upstream.text().catch(() => "Codex event stream unavailable.");
       return NextResponse.json(

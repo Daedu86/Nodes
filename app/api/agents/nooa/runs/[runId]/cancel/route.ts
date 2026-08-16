@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { cancelNooaRun } from "@/lib/agents/nooa/runner-client";
+import { getAgentHandle } from "@/lib/agents/runtime/handle";
 import { recordAgentEvent } from "@/lib/server/agent-work";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
 
@@ -18,8 +18,10 @@ export async function POST(
   if (!runId) return NextResponse.json({ error: "Missing run id." }, { status: 400 });
 
   try {
-    const upstream = await cancelNooaRun(guarded.user.id, runId);
-    const payload = await upstream.json().catch(() => ({ runId, status: "cancelled" }));
+    const payload = await getAgentHandle("nooa", {
+      ownerId: guarded.user.id,
+      runId,
+    }).cancel();
     await recordAgentEvent({
       actor: {
         tokenId: guarded.user.agentTokenId ?? null,

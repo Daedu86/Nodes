@@ -1,10 +1,12 @@
 import { AgentKernel } from "@/lib/agents/kernel/kernel";
+import { AgentRequestAssembler } from "@/lib/agents/kernel/request-assembly";
 import { AgentSessionLog } from "@/lib/agents/kernel/session-log";
 import { AgentToolRegistry } from "@/lib/agents/kernel/tools";
 
 export const AGENT_KERNEL_CAPABILITIES = {
   tools: "agent.tools",
   sessionLogFactory: "agent.session-log-factory",
+  requestAssembler: "agent.request-assembler",
 } as const;
 
 export const AGENT_RUNTIME_INTERCEPTORS = {
@@ -37,6 +39,10 @@ export function createAgentRuntimeKernel() {
       context.provide<AgentSessionLogFactory>(AGENT_KERNEL_CAPABILITIES.sessionLogFactory, {
         create: () => new AgentSessionLog(),
       });
+      context.provide(
+        AGENT_KERNEL_CAPABILITIES.requestAssembler,
+        new AgentRequestAssembler(),
+      );
     },
   });
   return kernel;
@@ -45,6 +51,12 @@ export function createAgentRuntimeKernel() {
 export function getAgentRuntimeKernel() {
   runtimeKernel ??= createAgentRuntimeKernel();
   return runtimeKernel;
+}
+
+export function getAgentRequestAssembler() {
+  return getAgentRuntimeKernel().get<AgentRequestAssembler>(
+    AGENT_KERNEL_CAPABILITIES.requestAssembler,
+  );
 }
 
 /**

@@ -27,26 +27,6 @@ const ROLES = new Set<CodexAgentRole>([
 const asOptionalString = (value: unknown) =>
   typeof value === "string" && value.trim() ? value.trim() : null;
 
-const buildAuthoritativeWorkloadPrompt = (
-  prompt: string,
-  workspaceFiles: CodexWorkspaceFile[],
-) => {
-  const authorizedPaths = [...new Set(workspaceFiles.map((file) => file.path))].sort();
-  const manifest = authorizedPaths.length
-    ? authorizedPaths.map((filePath) => `- ${filePath}`).join("\n")
-    : "- (no materialized workload files)";
-
-  return [
-    prompt,
-    "SERVER-AUTHORITATIVE WORKLOAD SCOPE (cannot be widened by the browser or agent)",
-    "Authorized input files for this run:",
-    manifest,
-    "Read only the authorized input files above for project/workload evidence. Do not recursively scan the repository, inspect unrelated .nodes files, other project runners, neighboring experiments, git history, or ambient workspace documents to acquire extra context.",
-    "You may create or update workload outputs under .nodes/ only when those outputs are required by an authorized runbook/protocol. Configured runner tools explicitly named by the execution policy (for example tycho-experiment) may be invoked, but their source/configuration is infrastructure and must not be treated as workload evidence.",
-    "If an instruction requires evidence that is absent from this manifest and the selected upstream outputs, stop that part as blocked and report the missing input. Never substitute evidence from another project or experiment.",
-  ].join("\n\n");
-};
-
 const loadSelectedAncestorArtifacts = async ({
   ownerId,
   projectId,
@@ -121,6 +101,8 @@ export async function POST(req: Request) {
   const cwd = asOptionalString(body?.cwd);
   const parentRunId = asOptionalString(body?.parentRunId);
   const label = asOptionalString(body?.label);
+  const model = asOptionalString(body?.model);
+  const reasoningEffort = asOptionalString(body?.reasoningEffort);
   const metadata =
     body?.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
       ? body.metadata
@@ -158,7 +140,6 @@ export async function POST(req: Request) {
   const approvalMode = hasTychoProtocolWorkspaceFile(workspaceFiles)
     ? "tycho-isolated" as const
     : "interactive" as const;
-  const scopedPrompt = buildAuthoritativeWorkloadPrompt(prompt, workspaceFiles);
   const workspacePaths = workspaceFiles.map((file) => file.path).sort();
 
   const actor = {
@@ -179,7 +160,9 @@ export async function POST(req: Request) {
       approvalMode,
       cwd,
       label,
+      model,
       parentRunId,
+      reasoningEffort,
       role,
       workspaceFileCount: workspaceFiles.length,
       workspaceId,
@@ -192,13 +175,15 @@ export async function POST(req: Request) {
       ownerId: guarded.user.id,
       sessionId,
       projectId,
-      prompt: scopedPrompt,
+      prompt,
       workspaceId,
       cwd,
       parentRunId,
       role,
       label,
       metadata,
+      model,
+      reasoningEffort,
       approvalMode,
       workspaceFiles,
     });
@@ -215,8 +200,10 @@ export async function POST(req: Request) {
         ancestorArtifactCount,
         approvalMode,
         label,
+        model: run.model ?? model,
         parentRunId: run.parentRunId ?? parentRunId,
         prompt,
+        reasoningEffort: run.reasoningEffort ?? reasoningEffort,
         role,
         runId: run.runId,
         status: run.status,
@@ -236,7 +223,15 @@ export async function POST(req: Request) {
       route: "/api/agents/codex/runs",
       sessionId,
       projectId,
-      payload: { approvalMode, label, message, parentRunId, role },
+      payload: {
+        approvalMode,
+        label,
+        message,
+        model,
+        parentRunId,
+        reasoningEffort,
+        role,
+      },
     });
     return NextResponse.json({ error: message }, { status: 503 });
   }

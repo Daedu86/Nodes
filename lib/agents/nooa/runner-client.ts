@@ -4,6 +4,11 @@ import type {
   AgentRuntimeStartRequest,
   AgentRuntimeStartResponse,
 } from "@/lib/agents/runtime/types";
+import {
+  prepareAgentRuntimeRequest,
+  recordAgentRuntimeStartFailure,
+  recordAgentRuntimeStartSuccess,
+} from "@/lib/server/agent-runtime-request";
 
 const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, "");
 
@@ -94,7 +99,50 @@ async function startNooaRunDirect(
 export async function startNooaRun(
   input: AgentRuntimeStartRequest,
 ): Promise<AgentRuntimeStartResponse> {
-  return runAgentRuntimeStartPipeline("nooa", input, startNooaRunDirect);
+  const prepared = await prepareAgentRuntimeRequest({
+    runtime: "nooa",
+    ownerId: input.ownerId,
+    sessionId: input.run.sessionId,
+    projectId: input.run.projectId,
+    role: input.run.role,
+    prompt: input.run.prompt,
+    sandboxPolicyId: input.run.sandbox?.policyId ?? null,
+    metadata: input.run.metadata,
+  });
+  const request: AgentRuntimeStartRequest = {
+    ...input,
+    run: {
+      ...input.run,
+      prompt: prepared.assembly.effectivePrompt,
+      metadata: {
+        ...input.run.metadata,
+        nodesKernel: {
+          assemblyId: prepared.assembly.header.assemblyId,
+          journalId: prepared.journal.identity.journalId,
+        },
+      },
+    },
+  };
+
+  try {
+    const response = await runAgentRuntimeStartPipeline(
+      "nooa",
+      request,
+      startNooaRunDirect,
+    );
+    await recordAgentRuntimeStartSuccess(prepared.journal, {
+      runtime: "nooa",
+      runId: response.runId,
+      providerRunId: response.providerRunId ?? null,
+    });
+    return response;
+  } catch (error) {
+    await recordAgentRuntimeStartFailure(prepared.journal, {
+      runtime: "nooa",
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }
 
 export async function streamNooaRunEvents(

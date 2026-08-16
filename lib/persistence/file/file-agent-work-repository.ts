@@ -173,6 +173,9 @@ export const fileAgentWorkRepository: AgentWorkRepository = {
     }
     const sorted = sortByDateDesc(events);
     const limit = typeof options.limit === "number" ? Math.max(1, Math.min(1000, options.limit)) : 80;
-    return sorted.slice(0, limit);
+    const offset = typeof options.offset === "number"
+      ? Math.max(0, Math.trunc(options.offset))
+      : 0;
+    return sorted.slice(offset, offset + limit);
   },
 };

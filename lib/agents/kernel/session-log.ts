@@ -10,16 +10,37 @@ export type AgentTurnEndReason =
   | "failed"
   | "interrupted";
 
+export type AgentRuntimeJournalStatus =
+  | "requested"
+  | "started"
+  | "failed"
+  | "cancelled";
+
 export type AgentSessionEventMap = {
   "turn.start": { turn: number };
   "turn.end": { turn: number; reason: AgentTurnEndReason };
   "step.start": { turn: number; step: number };
   "step.end": { turn: number; step: number };
   "request.snapshot": {
+    assemblyId?: string;
+    runtime?: string;
     provider: string;
-    model: string;
+    model?: string;
+    reasoningEffort?: string;
     systemPrompt?: string;
     tools?: string[];
+    contextWindow?: number;
+    approvalMode?: string;
+    sandboxPolicyId?: string;
+    workspacePaths?: string[];
+    sectionNames?: string[];
+  };
+  "runtime.run": {
+    runtime: string;
+    status: AgentRuntimeJournalStatus;
+    runId: string | null;
+    providerRunId?: string | null;
+    message?: string;
   };
   "user.message": {
     messageId: string;

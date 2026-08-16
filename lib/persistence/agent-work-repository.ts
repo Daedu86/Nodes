@@ -37,6 +37,7 @@ export type AgentTokenUpsertInput = {
 
 export type AgentWorkListOptions = {
   limit?: number;
+  offset?: number;
   tokenId?: string | null;
   sessionId?: string | null;
   projectId?: string | null;

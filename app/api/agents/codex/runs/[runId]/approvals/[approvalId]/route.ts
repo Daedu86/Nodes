@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { resolveCodexApproval } from "@/lib/agents/codex/runner-client";
-import type { CodexApprovalDecision } from "@/lib/agents/codex/types";
+import { getAgentHandle } from "@/lib/agents/runtime/handle";
+import type { AgentRuntimeApprovalDecision } from "@/lib/agents/runtime/types";
 import { recordAgentEvent } from "@/lib/server/agent-work";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
 
 export const runtime = "nodejs";
 
-const DECISIONS = new Set<CodexApprovalDecision>([
+const DECISIONS = new Set<AgentRuntimeApprovalDecision>([
   "accept",
   "acceptForSession",
   "decline",
@@ -26,16 +26,17 @@ export async function POST(
   const body = (await req.json().catch(() => null)) as { decision?: unknown } | null;
   const decision = typeof body?.decision === "string" ? body.decision : null;
 
-  if (!runId || !approvalId || !decision || !DECISIONS.has(decision as CodexApprovalDecision)) {
+  if (!runId || !approvalId || !decision || !DECISIONS.has(decision as AgentRuntimeApprovalDecision)) {
     return NextResponse.json({ error: "Invalid approval request." }, { status: 400 });
   }
 
   try {
-    await resolveCodexApproval(
-      guarded.user.id,
+    await getAgentHandle("codex", {
+      ownerId: guarded.user.id,
       runId,
+    }).resolveApproval(
       approvalId,
-      decision as CodexApprovalDecision,
+      decision as AgentRuntimeApprovalDecision,
     );
     await recordAgentEvent({
       actor: {
