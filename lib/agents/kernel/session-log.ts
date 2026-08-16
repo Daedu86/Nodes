@@ -17,6 +17,23 @@ export type AgentRuntimeJournalStatus =
   | "failed"
   | "cancelled";
 
+export type AgentContextCompactionTrigger =
+  | "absolute-threshold"
+  | "context-window-pressure";
+
+export type AgentContextCheckpointMetadata = {
+  compactionId: string;
+  estimatedTokensBefore: number;
+  estimatedTokensAfter: number;
+  triggerTokens: number;
+  triggerReason: AgentContextCompactionTrigger;
+  provider?: string;
+  model?: string;
+  contextWindow?: number;
+  estimatorId: string;
+  summarizerId: string;
+};
+
 export type AgentSessionEventMap = {
   "turn.start": { turn: number };
   "turn.end": { turn: number; reason: AgentTurnEndReason };
@@ -60,6 +77,7 @@ export type AgentSessionEventMap = {
     messageId: string;
     content: AgentJsonValue;
     source: "human" | "injected" | "checkpoint";
+    checkpoint?: AgentContextCheckpointMetadata;
   };
   "assistant.message": {
     messageId: string;
@@ -83,6 +101,13 @@ export type AgentSessionEventMap = {
     sourceSequences: number[];
     estimatedTokensBefore: number;
     estimatedTokensAfter: number;
+    triggerTokens?: number;
+    triggerReason?: AgentContextCompactionTrigger;
+    provider?: string;
+    model?: string;
+    contextWindow?: number;
+    estimatorId?: string;
+    summarizerId?: string;
   };
 };
 
@@ -170,6 +195,9 @@ const positiveInteger = (value: number, field: string) => {
 const isSurfaceEvent = (
   event: AgentSessionEvent,
 ): event is AgentSessionEvent<AgentSurfaceEventType> => SURFACE_TYPES.has(event.type);
+
+const sameSequences = (left: readonly number[], right: readonly number[]) =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
 
 /**
  * Append-only event log whose model-visible surface is derived from the log.
@@ -263,10 +291,7 @@ export class AgentSessionLog {
       }
 
       const shadowed = surface.slice(startIndex, endIndex + 1).map(({ sequence }) => sequence);
-      if (
-        shadowed.length !== event.sourceSequences.length ||
-        shadowed.some((sequence, index) => sequence !== event.sourceSequences[index])
-      ) {
+      if (!sameSequences(shadowed, event.sourceSequences)) {
         throw new Error(
           `Agent session surface replacement at sequence ${event.sequence} has incomplete source provenance.`,
         );
@@ -318,6 +343,64 @@ export class AgentSessionLog {
     }
     if (openTurn === null) return null;
     return this.append("turn.end", { turn: openTurn, reason: "interrupted" });
+  }
+
+  repairCompactionAudits(): AgentSessionEvent<"context.compaction">[] {
+    const audits = new Map<string, AgentSessionEvent<"context.compaction">>();
+    for (const event of this.log) {
+      if (event.type !== "context.compaction") continue;
+      const existing = audits.get(event.data.compactionId);
+      if (existing) {
+        throw new Error(
+          `Agent session has duplicate context compaction audit '${event.data.compactionId}'.`,
+        );
+      }
+      audits.set(event.data.compactionId, event);
+    }
+
+    const checkpoints = this.log.filter(
+      (event): event is AgentSessionEvent<"user.message"> =>
+        event.type === "user.message" &&
+        event.data.source === "checkpoint" &&
+        event.surfaceOp.kind === "replace" &&
+        event.data.checkpoint !== undefined,
+    );
+    const repaired: AgentSessionEvent<"context.compaction">[] = [];
+
+    for (const checkpoint of checkpoints) {
+      const metadata = checkpoint.data.checkpoint!;
+      const existing = audits.get(metadata.compactionId);
+      if (existing) {
+        if (
+          existing.data.checkpointSequence !== checkpoint.sequence ||
+          !sameSequences(existing.data.sourceSequences, checkpoint.sourceSequences)
+        ) {
+          throw new Error(
+            `Agent session context compaction audit '${metadata.compactionId}' does not match its checkpoint.`,
+          );
+        }
+        continue;
+      }
+
+      const audit = this.append("context.compaction", {
+        compactionId: metadata.compactionId,
+        checkpointSequence: checkpoint.sequence,
+        sourceSequences: [...checkpoint.sourceSequences],
+        estimatedTokensBefore: metadata.estimatedTokensBefore,
+        estimatedTokensAfter: metadata.estimatedTokensAfter,
+        triggerTokens: metadata.triggerTokens,
+        triggerReason: metadata.triggerReason,
+        provider: metadata.provider,
+        model: metadata.model,
+        contextWindow: metadata.contextWindow,
+        estimatorId: metadata.estimatorId,
+        summarizerId: metadata.summarizerId,
+      });
+      audits.set(metadata.compactionId, audit);
+      repaired.push(audit);
+    }
+
+    return repaired.map((event) => clone(event));
   }
 
   fork(boundarySequence = this.log.length): AgentSessionLog {

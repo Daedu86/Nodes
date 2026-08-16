@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import type {
+  AgentContextCompactionResult,
+  AgentContextCompactor,
+} from "@/lib/agents/kernel/context-compaction";
 import {
   AgentSessionLog,
   type AgentSessionEvent,
@@ -71,17 +75,21 @@ const readStoredEvent = (
 
 /**
  * Durable wrapper around `AgentSessionLog`. The in-memory log remains the
- * canonical surface/replay implementation; this class only persists newly
- * appended events through Nodes' existing AgentWorkRepository abstraction.
- * That means both file and Supabase backends work without a second database
- * schema or a parallel persistence configuration.
+ * canonical surface/replay implementation; this class persists newly appended
+ * events through Nodes' existing AgentWorkRepository abstraction.
+ *
+ * Durable compaction uses a fork: the replacement is persisted before the live
+ * journal surface is swapped to the compacted state. If storage fails after a
+ * partial write, this journal is poisoned and must be reloaded so deterministic
+ * event ids and audit repair can reconcile the durable prefix safely.
  */
 export class DurableAgentSessionJournal {
   readonly identity: AgentSessionJournalIdentity;
-  readonly log: AgentSessionLog;
 
   private readonly repository: AgentWorkRepository;
+  private currentLog: AgentSessionLog;
   private flushedSequence: number;
+  private reloadRequired = false;
 
   constructor(
     identity: AgentSessionJournalIdentity,
@@ -90,40 +98,94 @@ export class DurableAgentSessionJournal {
     flushedSequence = 0,
   ) {
     this.identity = identity;
-    this.log = log;
+    this.currentLog = log;
     this.repository = repository;
     this.flushedSequence = flushedSequence;
   }
 
+  get log(): AgentSessionLog {
+    return this.currentLog;
+  }
+
   async flush(): Promise<void> {
-    const pending = this.log
+    this.assertUsable();
+    const pending = this.currentLog
       .events()
       .filter((event) => event.sequence > this.flushedSequence);
 
     for (const event of pending) {
-      await this.repository.recordAgentEvent(this.identity.ownerId, {
-        id: journalEventId(this.identity.journalId, event.sequence),
-        tokenId: null,
-        eventType: `${SESSION_EVENT_PREFIX}${event.type}`,
-        method: "KERNEL",
-        route: "agent-session-journal",
-        sessionId: this.identity.sessionId,
-        projectId: this.identity.projectId,
-        payload: {
-          journalId: this.identity.journalId,
-          event,
-        },
-        createdAt: event.createdAt,
-        ownerId: this.identity.ownerId,
-      });
+      await this.persistEvent(event);
       this.flushedSequence = event.sequence;
     }
   }
 
+  async compactContextIfNeeded(
+    compactor: AgentContextCompactor,
+    signal: AbortSignal,
+  ): Promise<AgentContextCompactionResult | null> {
+    this.assertUsable();
+    await this.flush();
+    const candidate = this.currentLog.fork();
+    const result = await compactor.compactIfNeeded(candidate, signal);
+    if (!result) return null;
+
+    const pending = candidate
+      .events()
+      .filter((event) => event.sequence > this.flushedSequence);
+    try {
+      for (const event of pending) {
+        await this.persistEvent(event);
+      }
+    } catch (error) {
+      this.reloadRequired = true;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Agent session durable compaction was interrupted; reload journal before continuing. ${message}`,
+      );
+    }
+
+    this.currentLog = candidate;
+    this.flushedSequence = candidate.latestSequence();
+    return result;
+  }
+
   async repairInterruptedTail(): Promise<AgentSessionEvent<"turn.end"> | null> {
-    const repaired = this.log.repairInterruptedTail();
+    this.assertUsable();
+    const repaired = this.currentLog.repairInterruptedTail();
     if (repaired) await this.flush();
     return repaired;
+  }
+
+  async repairCompactionAudits(): Promise<AgentSessionEvent<"context.compaction">[]> {
+    this.assertUsable();
+    const repaired = this.currentLog.repairCompactionAudits();
+    if (repaired.length) await this.flush();
+    return repaired;
+  }
+
+  private assertUsable() {
+    if (!this.reloadRequired) return;
+    throw new Error(
+      "Agent session journal must be reloaded after interrupted durable compaction.",
+    );
+  }
+
+  private async persistEvent(event: AgentSessionEvent): Promise<void> {
+    await this.repository.recordAgentEvent(this.identity.ownerId, {
+      id: journalEventId(this.identity.journalId, event.sequence),
+      tokenId: null,
+      eventType: `${SESSION_EVENT_PREFIX}${event.type}`,
+      method: "KERNEL",
+      route: "agent-session-journal",
+      sessionId: this.identity.sessionId,
+      projectId: this.identity.projectId,
+      payload: {
+        journalId: this.identity.journalId,
+        event,
+      },
+      createdAt: event.createdAt,
+      ownerId: this.identity.ownerId,
+    });
   }
 }
 
@@ -171,17 +233,20 @@ export async function loadAgentSessionJournal(
     .filter((event): event is AgentSessionEvent => event !== null)
     .sort((left, right) => left.sequence - right.sequence);
   const log = new AgentSessionLog({ seed: events });
+  const loadedSequence = log.latestSequence();
   const projectId =
     input.projectId?.trim() ||
     records.find((record) => record.payload.journalId === journalId)?.projectId ||
     null;
-
-  return new DurableAgentSessionJournal(
+  const journal = new DurableAgentSessionJournal(
     { ownerId, sessionId, projectId, journalId },
     log,
     repository,
-    log.latestSequence(),
+    loadedSequence,
   );
+
+  await journal.repairCompactionAudits();
+  return journal;
 }
 
 export async function findAgentSessionJournalForRun(input: {
