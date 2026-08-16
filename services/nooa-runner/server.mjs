@@ -37,12 +37,29 @@ const MAX_EVENT_BACKLOG = positiveInteger(process.env.NOOA_MAX_EVENT_BACKLOG, 50
 const MAX_CONCURRENT_RUNS = positiveInteger(process.env.NOOA_MAX_CONCURRENT_RUNS, 2);
 const OPEN_SHELL_TIMEOUT_MS = positiveInteger(process.env.NOOA_OPENSHELL_TIMEOUT_MS, 900_000, 1_000);
 const RUNS_DIR = path.resolve(process.env.NOOA_RUNNER_HOME || path.join(os.tmpdir(), "nodes-nooa-runner"));
+const RUNTIME_EVENT_OUTBOX_DIR = path.resolve(
+  process.env.NOOA_RUNNER_EVENT_OUTBOX_DIR?.trim() ||
+    path.join(RUNS_DIR, "runtime-event-outbox"),
+);
 const WORKER_PATH = path.resolve(process.env.NOOA_WORKER_PATH || path.join(SERVICE_DIR, "worker.py"));
 
 const WORKSPACES = parseWorkspaceMap(process.env.NOOA_WORKSPACES_JSON);
 const POLICIES = parseOpenShellPolicyMap(process.env.NOOA_OPENSHELL_POLICIES_JSON, DEFAULT_IMAGE);
 const runs = new Map();
-const runtimeEventSink = createRuntimeEventSink({ runtime: "nooa", runnerToken: RUNNER_TOKEN });
+const runtimeEventSink = createRuntimeEventSink({
+  runtime: "nooa",
+  runnerToken: RUNNER_TOKEN,
+  outboxDir: RUNTIME_EVENT_OUTBOX_DIR,
+});
+void runtimeEventSink.recover().then((summary) => {
+  if (summary.attempted > 0) {
+    console.info(
+      `[nooa-runner] runtime event outbox recovery: ${summary.delivered}/${summary.attempted} delivered`,
+    );
+  }
+}).catch((error) => {
+  console.warn("[nooa-runner] runtime event outbox recovery failed", error);
+});
 
 const terminalStatuses = new Set(["completed", "failed", "cancelled"]);
 
@@ -111,8 +128,8 @@ function publish(run, type, source, payload = {}) {
   if (run.events.length > MAX_EVENT_BACKLOG) {
     run.events.splice(0, run.events.length - MAX_EVENT_BACKLOG);
   }
-  for (const subscriber of run.subscribers) writeSse(subscriber, event);
   void runtimeEventSink.enqueue(run, event);
+  for (const subscriber of run.subscribers) writeSse(subscriber, event);
   return event;
 }
 

@@ -29,12 +29,29 @@ const MANAGED_WORKSPACES_FILE = path.resolve(
   process.env.CODEX_RUNNER_MANAGED_WORKSPACES_FILE?.trim() ||
     path.join(process.cwd(), ".state", "managed-workspaces.json"),
 );
+const RUNTIME_EVENT_OUTBOX_DIR = path.resolve(
+  process.env.CODEX_RUNNER_EVENT_OUTBOX_DIR?.trim() ||
+    path.join(path.dirname(MANAGED_WORKSPACES_FILE), "runtime-event-outbox"),
+);
 
 const runs = new Map();
 const runByThreadId = new Map();
 const runByTurnId = new Map();
 const approvals = new Map();
-const runtimeEventSink = createRuntimeEventSink({ runtime: "codex", runnerToken: RUNNER_TOKEN });
+const runtimeEventSink = createRuntimeEventSink({
+  runtime: "codex",
+  runnerToken: RUNNER_TOKEN,
+  outboxDir: RUNTIME_EVENT_OUTBOX_DIR,
+});
+void runtimeEventSink.recover().then((summary) => {
+  if (summary.attempted > 0) {
+    console.info(
+      `[codex-runner] runtime event outbox recovery: ${summary.delivered}/${summary.attempted} delivered`,
+    );
+  }
+}).catch((error) => {
+  console.warn("[codex-runner] runtime event outbox recovery failed", error);
+});
 
 const isRecord = (value) => value && typeof value === "object" && !Array.isArray(value);
 const asString = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
@@ -229,8 +246,8 @@ function publish(run, notification) {
   const envelope = makeEnvelope(run, notification);
   run.events.push(envelope);
   if (run.events.length > MAX_EVENT_BACKLOG) run.events.splice(0, run.events.length - MAX_EVENT_BACKLOG);
-  for (const subscriber of run.subscribers) writeSse(subscriber, envelope);
   void runtimeEventSink.enqueue(run, envelope);
+  for (const subscriber of run.subscribers) writeSse(subscriber, envelope);
   return envelope;
 }
 
