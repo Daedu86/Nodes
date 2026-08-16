@@ -10,6 +10,14 @@ export const AGENT_RUNTIME_SCHEMA_VERSION = 1 as const;
 
 export type AgentRuntimeId = "codex" | "nooa";
 
+export type AgentRuntimeContinuationKind = "resume" | "fork";
+
+export type AgentRuntimeContinuation = {
+  kind: AgentRuntimeContinuationKind;
+  sourceRuntime: AgentRuntimeId;
+  sourceRunId: string;
+};
+
 export type AgentRuntimeCapability =
   | "approvals"
   | "child_agents"
@@ -51,6 +59,7 @@ export type AgentRuntimeNode = {
   projectId?: string | null;
   workspaceId?: string | null;
   parentRunId?: string | null;
+  continuation?: AgentRuntimeContinuation | null;
   sandbox?: OpenShellSandboxBinding | null;
   metadata?: Record<string, unknown>;
 };
@@ -61,7 +70,8 @@ export type AgentRuntimeCompileIssueCode =
   | "missing_prompt"
   | "unsupported_role"
   | "missing_openshell_policy"
-  | "invalid_openshell_policy";
+  | "invalid_openshell_policy"
+  | "invalid_continuation";
 
 export type AgentRuntimeCompileIssue = {
   code: AgentRuntimeCompileIssueCode;
@@ -80,6 +90,7 @@ export type CompiledAgentRun = {
   projectId: string | null;
   workspaceId: string | null;
   parentRunId: string | null;
+  continuation?: AgentRuntimeContinuation | null;
   sandbox: OpenShellSandboxBinding | null;
   metadata: Record<string, unknown>;
 };

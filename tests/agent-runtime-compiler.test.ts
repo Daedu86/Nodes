@@ -35,6 +35,31 @@ describe("compileAgentNode", () => {
     });
   });
 
+  it("normalizes a continuation only when one is explicitly present", () => {
+    const result = compileAgentNode({
+      id: "node-2",
+      runtime: "codex",
+      sessionId: "session-2",
+      prompt: "Continue from the durable boundary.",
+      continuation: {
+        kind: "fork",
+        sourceRuntime: "nooa",
+        sourceRunId: " source-run ",
+      },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      run: expect.objectContaining({
+        continuation: {
+          kind: "fork",
+          sourceRuntime: "nooa",
+          sourceRunId: "source-run",
+        },
+      }),
+    });
+  });
+
   it("requires an OpenShell policy for a NOOA node", () => {
     const result = compileAgentNode({
       id: "node-1",

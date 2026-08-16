@@ -51,6 +51,29 @@ export function compileAgentNode(
     );
   }
 
+  let continuation = node.continuation ?? null;
+  if (continuation) {
+    const kind = continuation.kind;
+    const sourceRuntime = continuation.sourceRuntime;
+    const sourceRunId = trimmed(continuation.sourceRunId);
+    if (
+      (kind !== "resume" && kind !== "fork") ||
+      (sourceRuntime !== "codex" && sourceRuntime !== "nooa") ||
+      !sourceRunId
+    ) {
+      issues.push(
+        issue(
+          "invalid_continuation",
+          "continuation",
+          "Agent continuation requires resume/fork, a supported source runtime, and a source run id.",
+        ),
+      );
+      continuation = null;
+    } else {
+      continuation = { kind, sourceRuntime, sourceRunId };
+    }
+  }
+
   const sandbox = node.sandbox ?? null;
   if (definition.requiresOpenShellPolicy && !sandbox) {
     issues.push(
@@ -86,6 +109,7 @@ export function compileAgentNode(
       projectId: trimmed(node.projectId) || null,
       workspaceId: trimmed(node.workspaceId) || null,
       parentRunId: trimmed(node.parentRunId) || null,
+      ...(continuation ? { continuation } : {}),
       sandbox: sandbox
         ? {
           provider: "openshell",

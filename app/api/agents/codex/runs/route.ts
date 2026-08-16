@@ -10,6 +10,7 @@ import { createAuthoritativeWorkloadSection } from "@/lib/agents/kernel/request-
 import { normalizeProjectMap } from "@/lib/project-map";
 import { getProject } from "@/lib/project-store";
 import type { SessionArtifact } from "@/lib/session-artifacts";
+import { parseAgentContinuationRequest } from "@/lib/server/agent-continuity";
 import { recordAgentEvent } from "@/lib/server/agent-work";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
 import { getSession } from "@/lib/session-store";
@@ -109,6 +110,16 @@ export async function POST(req: Request) {
       ? body.metadata
       : undefined;
 
+  let continuation;
+  try {
+    continuation = parseAgentContinuationRequest(body?.continuation);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Invalid continuation request." },
+      { status: 400 },
+    );
+  }
+
   const session = await getSession(sessionId, guarded.user.id).catch(() => null);
   if (!session) {
     return NextResponse.json({ error: "Session not found." }, { status: 404 });
@@ -159,6 +170,7 @@ export async function POST(req: Request) {
     payload: {
       ancestorArtifactCount,
       approvalMode,
+      continuation,
       cwd,
       label,
       model,
@@ -180,6 +192,7 @@ export async function POST(req: Request) {
       workspaceId,
       cwd,
       parentRunId,
+      continuation,
       role,
       label,
       metadata,
@@ -201,6 +214,7 @@ export async function POST(req: Request) {
       payload: {
         agentId: run.agentId ?? null,
         ancestorArtifactCount,
+        continuation,
         approvalMode,
         label,
         model: run.model ?? model,
@@ -228,6 +242,7 @@ export async function POST(req: Request) {
       projectId,
       payload: {
         approvalMode,
+        continuation,
         label,
         message,
         model,

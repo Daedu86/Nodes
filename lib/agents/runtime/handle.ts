@@ -9,6 +9,7 @@ import {
 } from "@/lib/agents/nooa/runner-client";
 import type {
   AgentRuntimeApprovalDecision,
+  AgentRuntimeContinuation,
   AgentRuntimeId,
 } from "@/lib/agents/runtime/types";
 import {
@@ -23,7 +24,9 @@ export type AgentHandleCapability =
   | "event_stream"
   | "approvals"
   | "status"
-  | "wait_until_idle";
+  | "wait_until_idle"
+  | "resume"
+  | "fork";
 
 export class AgentHandleCapabilityError extends Error {
   readonly code = "UNSUPPORTED_CAPABILITY" as const;
@@ -45,6 +48,8 @@ export type AgentHandle = {
   readonly capabilities: readonly AgentHandleCapability[];
   status(): Promise<AgentRunStatusSnapshot>;
   waitUntilIdle(options?: AgentWaitUntilIdleOptions): Promise<AgentRunStatusSnapshot>;
+  resume(): AgentRuntimeContinuation;
+  fork(): AgentRuntimeContinuation;
   cancel(): Promise<Record<string, unknown>>;
   openEventStream(afterEventId?: string | null): Promise<Response>;
   resolveApproval(
@@ -81,7 +86,7 @@ const cancelledPayload = async (response: Response, runId: string) => {
 
 const PROVIDERS: Record<AgentRuntimeId, AgentHandleProvider> = {
   codex: {
-    capabilities: ["cancel", "event_stream", "approvals", "status", "wait_until_idle"],
+    capabilities: ["cancel", "event_stream", "approvals", "status", "wait_until_idle", "resume", "fork"],
     async cancel(ownerId, runId) {
       return cancelledPayload(await cancelCodexRun(ownerId, runId), runId);
     },
@@ -91,7 +96,7 @@ const PROVIDERS: Record<AgentRuntimeId, AgentHandleProvider> = {
     },
   },
   nooa: {
-    capabilities: ["cancel", "event_stream", "status", "wait_until_idle"],
+    capabilities: ["cancel", "event_stream", "status", "wait_until_idle", "resume", "fork"],
     async cancel(ownerId, runId) {
       return cancelledPayload(await cancelNooaRun(ownerId, runId), runId);
     },
@@ -122,6 +127,8 @@ export function getAgentHandle(
     status: () => getAgentRunStatus({ ownerId, runtime, runId }),
     waitUntilIdle: (options) =>
       waitUntilAgentRunIdle({ ownerId, runtime, runId }, options),
+    resume: () => ({ kind: "resume", sourceRuntime: runtime, sourceRunId: runId }),
+    fork: () => ({ kind: "fork", sourceRuntime: runtime, sourceRunId: runId }),
     cancel: () => provider.cancel(ownerId, runId),
     openEventStream: (afterEventId) =>
       provider.openEventStream(ownerId, runId, afterEventId),

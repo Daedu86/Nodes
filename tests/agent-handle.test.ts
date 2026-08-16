@@ -15,15 +15,29 @@ describe("AgentHandle", () => {
       "approvals",
       "status",
       "wait_until_idle",
+      "resume",
+      "fork",
     ]);
     expect(nooa.capabilities).toEqual([
       "cancel",
       "event_stream",
       "status",
       "wait_until_idle",
+      "resume",
+      "fork",
     ]);
     expect(codex.runtime).toBe("codex");
     expect(nooa.runtime).toBe("nooa");
+    expect(codex.resume()).toEqual({
+      kind: "resume",
+      sourceRuntime: "codex",
+      sourceRunId: "run-1",
+    });
+    expect(nooa.fork()).toEqual({
+      kind: "fork",
+      sourceRuntime: "nooa",
+      sourceRunId: "run-2",
+    });
   });
 
   it("fails loudly when a runtime lacks a requested lifecycle capability", async () => {

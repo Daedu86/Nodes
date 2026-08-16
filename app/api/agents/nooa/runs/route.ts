@@ -45,6 +45,7 @@ export async function POST(req: Request) {
     sessionId: compilation.run.sessionId,
     projectId: compilation.run.projectId,
     payload: {
+      continuation: compilation.run.continuation,
       nodeId: compilation.run.nodeId,
       policyId: compilation.run.sandbox?.policyId ?? null,
       role: compilation.run.role,
@@ -62,6 +63,7 @@ export async function POST(req: Request) {
       sessionId: compilation.run.sessionId,
       projectId: compilation.run.projectId,
       payload: {
+        continuation: compilation.run.continuation,
         nodeId: run.nodeId,
         policyId: compilation.run.sandbox?.policyId ?? null,
         providerRunId: run.providerRunId ?? null,

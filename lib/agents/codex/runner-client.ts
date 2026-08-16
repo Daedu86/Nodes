@@ -360,6 +360,7 @@ export async function startCodexRun(
   input: CodexRunnerStartRequest,
   kernelOptions: CodexRunKernelOptions = {},
 ): Promise<CodexRunnerStartResponse> {
+  const { continuation, ...providerInput } = input;
   const workspacePaths = [...new Set(
     (input.workspaceFiles ?? []).map((file) => file.path.trim()).filter(Boolean),
   )].sort();
@@ -378,9 +379,10 @@ export async function startCodexRun(
     metadata: input.metadata,
     eventIngestion: eventSink.ingestion,
     sections: kernelOptions.sections,
+    continuation,
   });
   const request: CodexRunnerStartRequest = {
-    ...input,
+    ...providerInput,
     prompt: prepared.assembly.effectivePrompt,
     metadata: {
       ...input.metadata,
@@ -388,6 +390,16 @@ export async function startCodexRun(
         assemblyId: prepared.assembly.header.assemblyId,
         journalId: prepared.journal.identity.journalId,
         eventSinkUrl: eventSink.url,
+        continuation: prepared.continuation
+          ? {
+              kind: prepared.continuation.descriptor.kind,
+              sourceRuntime: prepared.continuation.descriptor.sourceRuntime,
+              sourceRunId: prepared.continuation.descriptor.sourceRunId,
+              sourceJournalId: prepared.continuation.sourceJournalId,
+              sourceBoundarySequence: prepared.continuation.sourceBoundarySequence,
+              strategy: "nodes-durable-replay-v1",
+            }
+          : null,
       },
     },
   };

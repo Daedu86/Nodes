@@ -1,3 +1,5 @@
+import type { AgentRuntimeContinuation } from "@/lib/agents/runtime/types";
+
 export type CodexAgentRole =
   | "coder"
   | "reviewer"
@@ -42,6 +44,7 @@ export type StartCodexRunInput = {
   workspaceId?: string | null;
   cwd?: string | null;
   parentRunId?: string | null;
+  continuation?: AgentRuntimeContinuation | null;
   role?: CodexAgentRole;
   label?: string | null;
   metadata?: Record<string, unknown>;

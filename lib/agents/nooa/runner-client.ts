@@ -101,6 +101,7 @@ export async function startNooaRun(
   input: AgentRuntimeStartRequest,
 ): Promise<AgentRuntimeStartResponse> {
   const eventSink = getAgentRuntimeEventSinkConfig("nooa");
+  const { continuation, ...providerRun } = input.run;
   const prepared = await prepareAgentRuntimeRequest({
     runtime: "nooa",
     ownerId: input.ownerId,
@@ -111,11 +112,12 @@ export async function startNooaRun(
     sandboxPolicyId: input.run.sandbox?.policyId ?? null,
     metadata: input.run.metadata,
     eventIngestion: eventSink.ingestion,
+    continuation,
   });
   const request: AgentRuntimeStartRequest = {
     ...input,
     run: {
-      ...input.run,
+      ...providerRun,
       prompt: prepared.assembly.effectivePrompt,
       metadata: {
         ...input.run.metadata,
@@ -123,6 +125,16 @@ export async function startNooaRun(
           assemblyId: prepared.assembly.header.assemblyId,
           journalId: prepared.journal.identity.journalId,
           eventSinkUrl: eventSink.url,
+          continuation: prepared.continuation
+            ? {
+                kind: prepared.continuation.descriptor.kind,
+                sourceRuntime: prepared.continuation.descriptor.sourceRuntime,
+                sourceRunId: prepared.continuation.descriptor.sourceRunId,
+                sourceJournalId: prepared.continuation.sourceJournalId,
+                sourceBoundarySequence: prepared.continuation.sourceBoundarySequence,
+                strategy: "nodes-durable-replay-v1",
+              }
+            : null,
         },
       },
     },

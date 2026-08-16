@@ -3,6 +3,14 @@ import type {
   AgentRequestAssembly,
 } from "@/lib/agents/kernel/request-assembly";
 import { getAgentRequestAssembler } from "@/lib/agents/runtime/kernel";
+import type { AgentRuntimeContinuation, AgentRuntimeId } from "@/lib/agents/runtime/types";
+import type { AgentWorkRepository } from "@/lib/persistence/agent-work-repository";
+import {
+  createAgentContinuationSection,
+  resolveAgentContinuation,
+  seedAgentContinuationJournal,
+  type PreparedAgentContinuation,
+} from "@/lib/server/agent-continuity";
 import {
   createAgentSessionJournal,
   type DurableAgentSessionJournal,
@@ -25,11 +33,14 @@ export type PrepareAgentRuntimeRequestInput = {
   metadata?: Readonly<Record<string, unknown>>;
   eventIngestion?: "stream" | "callback";
   sections?: readonly AgentPromptSection[];
+  continuation?: AgentRuntimeContinuation | null;
+  repository?: AgentWorkRepository;
 };
 
 export type PreparedAgentRuntimeRequest = {
   assembly: AgentRequestAssembly;
   journal: DurableAgentSessionJournal;
+  continuation: PreparedAgentContinuation | null;
 };
 
 /**
@@ -41,6 +52,20 @@ export type PreparedAgentRuntimeRequest = {
 export async function prepareAgentRuntimeRequest(
   input: PrepareAgentRuntimeRequestInput,
 ): Promise<PreparedAgentRuntimeRequest> {
+  const targetRuntime = input.runtime as AgentRuntimeId;
+  if (targetRuntime !== "codex" && targetRuntime !== "nooa") {
+    throw new Error(`Unsupported agent runtime '${input.runtime}' for durable request preparation.`);
+  }
+  const continuation = input.continuation
+    ? await resolveAgentContinuation({
+        ownerId: input.ownerId,
+        targetRuntime,
+        targetSessionId: input.sessionId,
+        targetProjectId: input.projectId,
+        continuation: input.continuation,
+        repository: input.repository,
+      })
+    : null;
   const assembly = getAgentRequestAssembler().assemble({
     runtime: input.runtime,
     sessionId: input.sessionId,
@@ -55,13 +80,21 @@ export async function prepareAgentRuntimeRequest(
     workspacePaths: input.workspacePaths,
     toolNames: input.toolNames,
     metadata: input.metadata,
-    sections: input.sections,
+    sections: continuation
+      ? [...(input.sections ?? []), createAgentContinuationSection(continuation)]
+      : input.sections,
   });
-  const journal = createAgentSessionJournal({
-    ownerId: input.ownerId,
-    sessionId: input.sessionId,
-    projectId: input.projectId,
-  });
+  const journal = continuation
+    ? seedAgentContinuationJournal(continuation, {
+        ownerId: input.ownerId,
+        repository: input.repository,
+      })
+    : createAgentSessionJournal({
+        ownerId: input.ownerId,
+        sessionId: input.sessionId,
+        projectId: input.projectId,
+        repository: input.repository,
+      });
 
   journal.log.append("request.snapshot", {
     assemblyId: assembly.header.assemblyId,
@@ -94,7 +127,7 @@ export async function prepareAgentRuntimeRequest(
   });
   await journal.flush();
 
-  return { assembly, journal };
+  return { assembly, journal, continuation };
 }
 
 export async function recordAgentRuntimeStartSuccess(

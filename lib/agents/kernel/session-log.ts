@@ -53,6 +53,19 @@ export type AgentSessionEventMap = {
     workspacePaths?: string[];
     sectionNames?: string[];
   };
+  "continuation.source": {
+    kind: "resume" | "fork";
+    strategy: "nodes-durable-replay-v1";
+    sourceRuntime: string;
+    sourceRunId: string;
+    sourceJournalId: string;
+    sourceSessionId: string;
+    sourceProjectId: string | null;
+    sourceBoundarySequence: number;
+    sourceSurfaceSequences: number[];
+    sourceCheckpointSequence: number | null;
+    sourceUpdatedAt: string;
+  };
   "runtime.run": {
     runtime: string;
     status: AgentRuntimeJournalStatus;

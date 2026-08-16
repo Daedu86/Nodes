@@ -66,6 +66,7 @@ Post-start lifecycle is exposed through `AgentHandle`:
 
 - `status()` from the durable journal;
 - `waitUntilIdle()` with timeout and cancellation;
+- `resume()` / `fork()` create typed durable-continuation descriptors for the next explicit start;
 - `cancel()`;
 - `openEventStream()`;
 - `resolveApproval()` when the provider supports approvals.
@@ -147,7 +148,17 @@ The current outbox is process-restart durable when its underlying filesystem sur
 
 Runtime journal projection now checks compaction automatically after model-visible assistant messages and tool results. If the canonical request advertises a `contextWindow`, Nodes compacts at 80% pressure; otherwise it uses a 12k-token maintenance fallback. The default estimator reuses Nodes' deterministic character heuristic (`nodes.chars-per-4-v1`) and the default summarizer is a bounded local structural/extractive checkpoint (`nodes.structural-extractive-v1`). Automatic maintenance therefore makes no hidden provider call, consumes no user model credits, and does not bypass chat quota/audit. Both remain replaceable behind the compactor seam.
 
-This compacts Nodes' durable model-visible replay surface. It does not mutate an opaque provider-owned live thread; applying checkpoints to a continued provider thread belongs to the future durable resume/fork seam.
+This compacts Nodes' durable model-visible replay surface. It does not mutate an opaque provider-owned live thread. Durable resume/fork consumes this compacted surface through an explicit replay seam described below.
+
+## 8. Durable resume and fork
+
+`AgentHandle.resume()` and `AgentHandle.fork()` are side-effect-free descriptor builders. The descriptor names the source runtime/run and is consumed by the next explicit Codex or NOOA start request through its `continuation` field. This keeps workload files, sandbox policy, role and other target-run configuration under the normal server-owned start path instead of hiding a provider start behind the lifecycle handle.
+
+Before dispatch, Nodes resolves the source run back to its owner-bound durable journal and snapshots the current model-visible surface at an exact journal sequence. `resume` requires a terminal source and the same runtime/session/project. `fork` requires an idle source boundary and may target another runtime or session, which is the primitive needed for independent Challenger branches. A running source cannot be forked because its selected single writer may still be appending events.
+
+The new execution receives a fresh journal. Its first event is `continuation.source`, which records the source journal/run, boundary sequence, visible source sequences, latest checkpoint sequence when present, source timestamp and the `nodes-durable-replay-v1` strategy. The current visible surface is then copied into the child journal before the new request snapshot and human continuation prompt are persisted. The parent journal is never mutated.
+
+Because current Codex and NOOA runner starts accept a flattened prompt rather than a provider-neutral message-history API, Nodes also renders the copied surface as the authoritative `nodes:durable-continuation-replay` request section. The section explicitly states that this is a Nodes-owned replay and **not** proof of provider-native thread resumption. Provider-private state outside the durable transcript is intentionally not assumed. A future adapter may map this seam to a true provider resume token only when that provider exposes semantics Nodes can verify.
 
 ## Core capabilities
 
@@ -182,10 +193,10 @@ The kernel must preserve these existing Nodes boundaries:
 
 ## Next migration steps
 
-1. Add durable fork/resume APIs over journals once continuation semantics are defined for provider threads and child-run lineage.
+1. Connect durable fork descriptors to Project Map/Arena branch creation and let Tycho remain the promotion authority for Challenger outcomes.
 2. Move reusable approval/sandbox/tool policy into scoped kernel capabilities while preserving runner enforcement boundaries.
 3. Add an optional semantic compaction summarizer only behind explicit credential, quota and audit policy; keep the local structural summarizer as the fail-safe default.
-4. Extend `AgentHandle` further only when concrete cross-provider consumers need send/inject semantics.
+4. Add provider-native resume tokens only for runtimes whose continuation semantics can be verified against the durable replay boundary.
 5. If deployment requirements demand power-loss-grade or cross-host delivery guarantees, add fsync/ACK checkpointing or a durable broker behind the outbox seam.
 
 The Project Map, Arena, Tycho and M1–M8 remain above this layer. The kernel exists to make the execution substrate reproducible and replaceable; it does not replace Nodes' decision and learning model.
