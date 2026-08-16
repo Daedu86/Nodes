@@ -31,6 +31,17 @@ export type CreateAgentSessionJournalInput = {
   repository?: AgentWorkRepository;
 };
 
+export class AgentDurableCompactionInterruptedError extends Error {
+  readonly code = "AGENT_DURABLE_COMPACTION_INTERRUPTED" as const;
+
+  constructor(message: string) {
+    super(
+      `Agent session durable compaction was interrupted; reload journal before continuing. ${message}`,
+    );
+    this.name = "AgentDurableCompactionInterruptedError";
+  }
+}
+
 const nonEmpty = (value: string, field: string) => {
   const normalized = value.trim();
   if (!normalized) throw new Error(`Agent session journal ${field} must not be empty.`);
@@ -139,9 +150,7 @@ export class DurableAgentSessionJournal {
     } catch (error) {
       this.reloadRequired = true;
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `Agent session durable compaction was interrupted; reload journal before continuing. ${message}`,
-      );
+      throw new AgentDurableCompactionInterruptedError(message);
     }
 
     this.currentLog = candidate;

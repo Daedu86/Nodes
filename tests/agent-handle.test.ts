@@ -9,8 +9,19 @@ describe("AgentHandle", () => {
     const codex = getAgentHandle("codex", { ownerId: "owner-1", runId: "run-1" });
     const nooa = getAgentHandle("nooa", { ownerId: "owner-1", runId: "run-2" });
 
-    expect(codex.capabilities).toEqual(["cancel", "event_stream", "approvals"]);
-    expect(nooa.capabilities).toEqual(["cancel", "event_stream"]);
+    expect(codex.capabilities).toEqual([
+      "cancel",
+      "event_stream",
+      "approvals",
+      "status",
+      "wait_until_idle",
+    ]);
+    expect(nooa.capabilities).toEqual([
+      "cancel",
+      "event_stream",
+      "status",
+      "wait_until_idle",
+    ]);
     expect(codex.runtime).toBe("codex");
     expect(nooa.runtime).toBe("nooa");
   });

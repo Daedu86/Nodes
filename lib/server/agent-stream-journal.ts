@@ -1,4 +1,5 @@
 import { normalizeCodexNotification } from "@/lib/agents/codex/event-mapper";
+import { compactAgentSessionJournalIfNeeded } from "@/lib/server/agent-context-compaction";
 import { codexEventToRuntimeEvent } from "@/lib/agents/runtime/codex-event-adapter";
 import type {
   AgentJsonValue,
@@ -13,7 +14,9 @@ import type {
 } from "@/lib/agents/runtime/types";
 import type { AgentWorkRepository } from "@/lib/persistence/agent-work-repository";
 import {
+  AgentDurableCompactionInterruptedError,
   findAgentSessionJournalForRun,
+  loadAgentSessionJournal,
   type DurableAgentSessionJournal,
 } from "@/lib/server/agent-session-journal";
 
@@ -43,6 +46,11 @@ const RUNTIME_EVENT_SOURCES = new Set<AgentRuntimeEventSource>([
   "runtime",
   "sandbox",
   "compiler",
+]);
+
+const AUTO_COMPACTION_EVENT_TYPES = new Set<AgentRuntimeEventType>([
+  "agent.message.completed",
+  "tool.completed",
 ]);
 
 export type AgentStreamRuntimeEvent = {
@@ -365,6 +373,14 @@ export async function projectRuntimeEventToJournal(
   });
   appendSemanticProjection(journal, event);
   await journal.flush();
+  if (AUTO_COMPACTION_EVENT_TYPES.has(event.type)) {
+    try {
+      await compactAgentSessionJournalIfNeeded(journal);
+    } catch (error) {
+      if (error instanceof AgentDurableCompactionInterruptedError) throw error;
+      console.warn("[agent-kernel] automatic context compaction skipped", error);
+    }
+  }
   return true;
 }
 
@@ -374,8 +390,9 @@ export async function createAgentStreamJournalProjector(input: {
   runId: string;
   repository?: AgentWorkRepository;
 }) {
-  const journal = await findAgentSessionJournalForRun(input);
-  if (!journal) return null;
+  const initialJournal = await findAgentSessionJournalForRun(input);
+  if (!initialJournal) return null;
+  let journal: DurableAgentSessionJournal = initialJournal;
   const callbackOwned = journal.log.events().some(
     (event) =>
       event.type === "runtime.run" &&
@@ -388,7 +405,20 @@ export async function createAgentStreamJournalProjector(input: {
     async projectValue(value: unknown) {
       const event = normalizeAgentStreamEvent(input.runtime, value, input.runId);
       if (!event) return false;
-      return projectRuntimeEventToJournal(journal, event);
+      try {
+        return await projectRuntimeEventToJournal(journal, event);
+      } catch (error) {
+        if (error instanceof AgentDurableCompactionInterruptedError) {
+          journal = await loadAgentSessionJournal({
+            ownerId: journal.identity.ownerId,
+            sessionId: journal.identity.sessionId,
+            projectId: journal.identity.projectId,
+            journalId: journal.identity.journalId,
+            repository: input.repository,
+          });
+        }
+        throw error;
+      }
     },
   };
 }

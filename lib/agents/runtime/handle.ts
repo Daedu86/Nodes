@@ -11,11 +11,19 @@ import type {
   AgentRuntimeApprovalDecision,
   AgentRuntimeId,
 } from "@/lib/agents/runtime/types";
+import {
+  getAgentRunStatus,
+  waitUntilAgentRunIdle,
+  type AgentRunStatusSnapshot,
+  type AgentWaitUntilIdleOptions,
+} from "@/lib/agents/runtime/run-status";
 
 export type AgentHandleCapability =
   | "cancel"
   | "event_stream"
-  | "approvals";
+  | "approvals"
+  | "status"
+  | "wait_until_idle";
 
 export class AgentHandleCapabilityError extends Error {
   readonly code = "UNSUPPORTED_CAPABILITY" as const;
@@ -35,6 +43,8 @@ export type AgentHandle = {
   readonly ownerId: string;
   readonly runId: string;
   readonly capabilities: readonly AgentHandleCapability[];
+  status(): Promise<AgentRunStatusSnapshot>;
+  waitUntilIdle(options?: AgentWaitUntilIdleOptions): Promise<AgentRunStatusSnapshot>;
   cancel(): Promise<Record<string, unknown>>;
   openEventStream(afterEventId?: string | null): Promise<Response>;
   resolveApproval(
@@ -71,7 +81,7 @@ const cancelledPayload = async (response: Response, runId: string) => {
 
 const PROVIDERS: Record<AgentRuntimeId, AgentHandleProvider> = {
   codex: {
-    capabilities: ["cancel", "event_stream", "approvals"],
+    capabilities: ["cancel", "event_stream", "approvals", "status", "wait_until_idle"],
     async cancel(ownerId, runId) {
       return cancelledPayload(await cancelCodexRun(ownerId, runId), runId);
     },
@@ -81,7 +91,7 @@ const PROVIDERS: Record<AgentRuntimeId, AgentHandleProvider> = {
     },
   },
   nooa: {
-    capabilities: ["cancel", "event_stream"],
+    capabilities: ["cancel", "event_stream", "status", "wait_until_idle"],
     async cancel(ownerId, runId) {
       return cancelledPayload(await cancelNooaRun(ownerId, runId), runId);
     },
@@ -109,6 +119,9 @@ export function getAgentHandle(
     ownerId,
     runId,
     capabilities: provider.capabilities,
+    status: () => getAgentRunStatus({ ownerId, runtime, runId }),
+    waitUntilIdle: (options) =>
+      waitUntilAgentRunIdle({ ownerId, runtime, runId }, options),
     cancel: () => provider.cancel(ownerId, runId),
     openEventStream: (afterEventId) =>
       provider.openEventStream(ownerId, runId, afterEventId),

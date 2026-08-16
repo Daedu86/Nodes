@@ -64,6 +64,8 @@ Both Codex and NOOA starts pass through the shared `runtime.start` waterfall. Li
 
 Post-start lifecycle is exposed through `AgentHandle`:
 
+- `status()` from the durable journal;
+- `waitUntilIdle()` with timeout and cancellation;
 - `cancel()`;
 - `openEventStream()`;
 - `resolveApproval()` when the provider supports approvals.
@@ -143,7 +145,9 @@ The current outbox is process-restart durable when its underlying filesystem sur
 
 `AgentContextCompactor` is provider-neutral. It receives an injected token estimator and summarizer, selects an old prefix while retaining a bounded recent tail, verifies that the proposed checkpoint reduces estimated context, then appends a provenance-preserving replacement plus a log-only compaction record.
 
-It is not yet wired to provider-advertised context windows or production tokenizer/summarizer plugins.
+Runtime journal projection now checks compaction automatically after model-visible assistant messages and tool results. If the canonical request advertises a `contextWindow`, Nodes compacts at 80% pressure; otherwise it uses a 12k-token maintenance fallback. The default estimator reuses Nodes' deterministic character heuristic (`nodes.chars-per-4-v1`) and the default summarizer is a bounded local structural/extractive checkpoint (`nodes.structural-extractive-v1`). Automatic maintenance therefore makes no hidden provider call, consumes no user model credits, and does not bypass chat quota/audit. Both remain replaceable behind the compactor seam.
+
+This compacts Nodes' durable model-visible replay surface. It does not mutate an opaque provider-owned live thread; applying checkpoints to a continued provider thread belongs to the future durable resume/fork seam.
 
 ## Core capabilities
 
@@ -178,10 +182,10 @@ The kernel must preserve these existing Nodes boundaries:
 
 ## Next migration steps
 
-1. Connect provider/model context-window metadata, token estimators and summarizers to automatic compaction.
+1. Add durable fork/resume APIs over journals once continuation semantics are defined for provider threads and child-run lineage.
 2. Move reusable approval/sandbox/tool policy into scoped kernel capabilities while preserving runner enforcement boundaries.
-3. Extend `AgentHandle` only when concrete cross-provider consumers need send/inject/status/wait-until-idle semantics.
-4. Add durable fork/resume APIs over journals once continuation semantics are defined for provider threads and child-run lineage.
+3. Add an optional semantic compaction summarizer only behind explicit credential, quota and audit policy; keep the local structural summarizer as the fail-safe default.
+4. Extend `AgentHandle` further only when concrete cross-provider consumers need send/inject semantics.
 5. If deployment requirements demand power-loss-grade or cross-host delivery guarantees, add fsync/ACK checkpointing or a durable broker behind the outbox seam.
 
 The Project Map, Arena, Tycho and M1–M8 remain above this layer. The kernel exists to make the execution substrate reproducible and replaceable; it does not replace Nodes' decision and learning model.
