@@ -1,8 +1,12 @@
+import { createHash } from "node:crypto";
 import {
   AgentSessionLog,
   type AgentSessionEvent,
 } from "@/lib/agents/kernel/session-log";
-import type { AgentWorkRepository } from "@/lib/persistence/agent-work-repository";
+import type {
+  AgentEventRecord,
+  AgentWorkRepository,
+} from "@/lib/persistence/agent-work-repository";
 import { getAgentWorkRepository } from "@/lib/persistence/repositories";
 
 const SESSION_EVENT_PREFIX = "kernel.session.";
@@ -29,8 +33,19 @@ const nonEmpty = (value: string, field: string) => {
   return normalized;
 };
 
-const journalEventId = (journalId: string, sequence: number) =>
-  `kernel-session-${encodeURIComponent(journalId)}-${sequence}`;
+const journalEventId = (journalId: string, sequence: number) => {
+  const hex = createHash("sha256")
+    .update(`${journalId}:${sequence}`)
+    .digest("hex")
+    .slice(0, 32);
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join("-");
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -127,7 +142,7 @@ export async function loadAgentSessionJournal(
   const sessionId = nonEmpty(input.sessionId, "sessionId");
   const journalId = nonEmpty(input.journalId, "journalId");
   const repository = input.repository ?? getAgentWorkRepository();
-  const records = [];
+  const records: AgentEventRecord[] = [];
 
   for (let offset = 0; ; offset += PAGE_SIZE) {
     const page = await repository.listAgentEvents(ownerId, {
