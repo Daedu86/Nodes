@@ -19,6 +19,12 @@ const objectSchema = {
   },
 };
 
+const passthroughSchema = {
+  parse(value: unknown) {
+    return value;
+  },
+};
+
 const executionContext = (signal = new AbortController().signal) => ({
   runId: "run-1",
   callId: "call-1",
@@ -53,6 +59,31 @@ describe("AgentToolRegistry", () => {
       arguments: { wrong: true },
       context: executionContext(),
     })).rejects.toMatchObject({ code: "INVALID_ARGS" });
+  });
+
+  it("enforces a frozen lossless-JSON boundary around tool execution", async () => {
+    const registry = new AgentToolRegistry();
+    let receivedFrozenArguments = false;
+    registry.register({
+      name: "non-json-output",
+      description: "Return an unsupported object",
+      input: objectSchema,
+      output: passthroughSchema,
+      execute: (args) => {
+        receivedFrozenArguments = Object.isFrozen(args);
+        return new Date("2026-08-16T00:00:00.000Z");
+      },
+    });
+
+    await expect(registry.execute({
+      name: "non-json-output",
+      arguments: { text: "nodes" },
+      context: executionContext(),
+    })).rejects.toMatchObject({
+      code: "INVALID_OUTPUT",
+      message: expect.stringContaining("non-plain object"),
+    });
+    expect(receivedFrozenArguments).toBe(true);
   });
 
   it("applies monotonic policy guards before execution", async () => {
