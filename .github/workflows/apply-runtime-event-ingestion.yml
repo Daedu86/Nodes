@@ -1,0 +1,479 @@
+name: Apply runtime event ingestion
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-runtime-event-ingestion.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Apply exact source transformations
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+
+          const read = (file) => fs.readFileSync(file, 'utf8')
+          const write = (file, content) => {
+            fs.mkdirSync(path.dirname(file), { recursive: true })
+            fs.writeFileSync(file, content)
+          }
+          const replaceOnce = (file, before, after) => {
+            const source = read(file)
+            const first = source.indexOf(before)
+            const last = source.lastIndexOf(before)
+            if (first < 0 || first !== last) {
+              throw new Error(`Expected exactly one match in ${file}`)
+            }
+            write(file, source.slice(0, first) + after + source.slice(first + before.length))
+          }
+
+          write('lib/server/agent-runtime-event-sink-url.ts', `const EVENT_SINK_PATH = "/api/agents/runtime-events";
+
+const absoluteHttpUrl = (value: string) => {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+};
+
+export function getAgentRuntimeEventSinkUrl(): string | null {
+  const explicit = process.env.NODES_RUNTIME_EVENT_SINK_URL?.trim();
+  if (explicit) return absoluteHttpUrl(explicit);
+
+  const nextAuthUrl = process.env.NEXTAUTH_URL?.trim();
+  if (nextAuthUrl) {
+    const base = absoluteHttpUrl(nextAuthUrl);
+    if (base) return new URL(EVENT_SINK_PATH, base).toString();
+  }
+
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  if (vercelUrl) {
+    const base = absoluteHttpUrl("https://" + vercelUrl);
+    if (base) return new URL(EVENT_SINK_PATH, base).toString();
+  }
+
+  return null;
+}
+`)
+
+          write('services/runtime-event-sink.mjs', `const DEFAULT_RETRY_DELAYS_MS = [0, 250, 1000, 3000];
+const DEFAULT_TIMEOUT_MS = 5000;
+
+const asString = (value) => typeof value === "string" && value.trim() ? value.trim() : null;
+
+function asHttpUrl(value) {
+  const raw = asString(value);
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+export function createRuntimeEventSink({
+  runtime,
+  runnerToken,
+  fetchImpl = globalThis.fetch,
+  retryDelaysMs = DEFAULT_RETRY_DELAYS_MS,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  sleepImpl = sleep,
+}) {
+  const normalizedRuntime = asString(runtime);
+  const token = asString(runnerToken);
+  const queues = new Map();
+
+  if (!normalizedRuntime) throw new Error("Runtime event sink requires a runtime id.");
+  if (typeof fetchImpl !== "function") throw new Error("Runtime event sink requires fetch support.");
+
+  async function deliver(run, event) {
+    const eventSinkUrl = asHttpUrl(run?.eventSinkUrl);
+    const ownerId = asString(run?.ownerId);
+    const sessionId = asString(run?.sessionId);
+    const journalId = asString(run?.journalId);
+    const runId = asString(run?.runId);
+    if (!eventSinkUrl || !ownerId || !sessionId || !journalId || !runId || !token) return false;
+
+    const body = JSON.stringify({
+      runtime: normalizedRuntime,
+      ownerId,
+      sessionId,
+      projectId: asString(run?.projectId),
+      journalId,
+      runId,
+      event,
+    });
+    let lastError = null;
+
+    for (let index = 0; index < retryDelaysMs.length; index += 1) {
+      const delay = Number(retryDelaysMs[index]) || 0;
+      if (delay > 0) await sleepImpl(delay);
+      try {
+        const response = await fetchImpl(eventSinkUrl, {
+          method: "POST",
+          headers: {
+            authorization: "Bearer " + token,
+            "content-type": "application/json",
+          },
+          body,
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (response.ok) return true;
+        const retryable = response.status === 429 || response.status >= 500;
+        lastError = new Error("Runtime event sink rejected delivery with status " + response.status + ".");
+        if (!retryable) break;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+
+    throw lastError ?? new Error("Runtime event sink delivery failed.");
+  }
+
+  function enqueue(run, event) {
+    const runId = asString(run?.runId) || "unknown";
+    const previous = queues.get(runId) ?? Promise.resolve(false);
+    const current = previous
+      .catch(() => false)
+      .then(() => deliver(run, event));
+    queues.set(runId, current);
+    void current
+      .catch((error) => {
+        console.warn("[" + normalizedRuntime + "-runner] runtime event sink delivery failed", error);
+        return false;
+      })
+      .finally(() => {
+        if (queues.get(runId) === current) queues.delete(runId);
+      });
+    return current;
+  }
+
+  return { enqueue };
+}
+`)
+
+          write('app/api/agents/runtime-events/route.ts', `import { timingSafeEqual } from "node:crypto";
+import { NextResponse } from "next/server";
+import type { AgentRuntimeId } from "@/lib/agents/runtime/types";
+import {
+  normalizeAgentStreamEvent,
+  projectRuntimeEventToJournal,
+} from "@/lib/server/agent-stream-journal";
+import { loadAgentSessionJournal } from "@/lib/server/agent-session-journal";
+
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
+const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const RUNTIMES = new Set<AgentRuntimeId>(["codex", "nooa"]);
+
+const asString = (value: unknown) =>
+  typeof value === "string" && value.trim() ? value.trim() : null;
+
+const tokenForRuntime = (runtimeId: AgentRuntimeId) =>
+  (runtimeId === "codex" ? process.env.CODEX_RUNNER_TOKEN : process.env.NOOA_RUNNER_TOKEN)?.trim() || null;
+
+const bearerToken = (req: Request) => {
+  const header = req.headers.get("authorization")?.trim() || "";
+  const match = /^Bearer\\s+(.+)$/i.exec(header);
+  return match?.[1]?.trim() || null;
+};
+
+const secretsEqual = (left: string, right: string) => {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  return a.length === b.length && timingSafeEqual(a, b);
+};
+
+async function readBody(req: Request) {
+  const text = await req.text();
+  if (Buffer.byteLength(text, "utf8") > MAX_BODY_BYTES) {
+    throw new Error("PAYLOAD_TOO_LARGE");
+  }
+  return JSON.parse(text) as Record<string, unknown>;
+}
+
+export async function POST(req: Request) {
+  let body: Record<string, unknown>;
+  try {
+    body = await readBody(req);
+  } catch (error) {
+    if (error instanceof Error && error.message === "PAYLOAD_TOO_LARGE") {
+      return NextResponse.json({ error: "Runtime event payload is too large." }, { status: 413 });
+    }
+    return NextResponse.json({ error: "Invalid runtime event payload." }, { status: 400 });
+  }
+
+  const runtimeId = asString(body.runtime);
+  if (!runtimeId || !RUNTIMES.has(runtimeId as AgentRuntimeId)) {
+    return NextResponse.json({ error: "Unsupported runtime." }, { status: 400 });
+  }
+  const runtime = runtimeId as AgentRuntimeId;
+  const expectedToken = tokenForRuntime(runtime);
+  if (!expectedToken) {
+    return NextResponse.json({ error: "Runtime event sink is not configured." }, { status: 503 });
+  }
+  const suppliedToken = bearerToken(req);
+  if (!suppliedToken || !secretsEqual(suppliedToken, expectedToken)) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
+  const ownerId = asString(body.ownerId);
+  const sessionId = asString(body.sessionId);
+  const journalId = asString(body.journalId);
+  const runId = asString(body.runId);
+  const projectId = asString(body.projectId);
+  if (!ownerId || !sessionId || !journalId || !runId || !body.event) {
+    return NextResponse.json({ error: "Missing runtime event identity." }, { status: 400 });
+  }
+
+  try {
+    const journal = await loadAgentSessionJournal({ ownerId, sessionId, journalId });
+    if ((journal.identity.projectId ?? null) !== (projectId ?? null)) {
+      return NextResponse.json({ error: "Runtime event project identity mismatch." }, { status: 409 });
+    }
+    const event = normalizeAgentStreamEvent(runtime, body.event, runId);
+    if (!event) {
+      return NextResponse.json({ error: "Invalid runtime event envelope." }, { status: 400 });
+    }
+    const projected = await projectRuntimeEventToJournal(journal, event);
+    return NextResponse.json({ accepted: true, projected }, { status: projected ? 201 : 200 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to persist runtime event.";
+    console.warn("[agent-kernel] runtime event callback failed", message);
+    return NextResponse.json({ error: "Unable to persist runtime event." }, { status: 503 });
+  }
+}
+`)
+
+          write('tests/runtime-event-sink.test.js', `import { describe, expect, it, vi } from "vitest";
+import { createRuntimeEventSink } from "../services/runtime-event-sink.mjs";
+
+describe("runtime event sink", () => {
+  it("serializes an authenticated runner event delivery", async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: true, status: 201 }));
+    const sink = createRuntimeEventSink({
+      runtime: "nooa",
+      runnerToken: "secret",
+      fetchImpl,
+      retryDelaysMs: [0],
+    });
+    const delivered = await sink.enqueue({
+      ownerId: "owner-1",
+      sessionId: "session-1",
+      projectId: "project-1",
+      journalId: "journal-1",
+      runId: "run-1",
+      eventSinkUrl: "https://nodes.example/api/agents/runtime-events",
+    }, { id: "event-1", runId: "run-1" });
+
+    expect(delivered).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe("https://nodes.example/api/agents/runtime-events");
+    expect(init.headers.authorization).toBe("Bearer secret");
+    expect(JSON.parse(init.body)).toMatchObject({
+      runtime: "nooa",
+      ownerId: "owner-1",
+      journalId: "journal-1",
+      runId: "run-1",
+      event: { id: "event-1" },
+    });
+  });
+
+  it("retries retryable failures and stays disabled without a shared secret", async () => {
+    const retryingFetch = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({ ok: true, status: 200 });
+    const retrying = createRuntimeEventSink({
+      runtime: "codex",
+      runnerToken: "secret",
+      fetchImpl: retryingFetch,
+      retryDelaysMs: [0, 0],
+      sleepImpl: async () => undefined,
+    });
+    await expect(retrying.enqueue({
+      ownerId: "owner-1",
+      sessionId: "session-1",
+      journalId: "journal-1",
+      runId: "run-1",
+      eventSinkUrl: "https://nodes.example/api/agents/runtime-events",
+    }, { id: "event-1", runId: "run-1" })).resolves.toBe(true);
+    expect(retryingFetch).toHaveBeenCalledTimes(2);
+
+    const disabledFetch = vi.fn();
+    const disabled = createRuntimeEventSink({
+      runtime: "codex",
+      runnerToken: null,
+      fetchImpl: disabledFetch,
+      retryDelaysMs: [0],
+    });
+    await expect(disabled.enqueue({
+      ownerId: "owner-1",
+      sessionId: "session-1",
+      journalId: "journal-1",
+      runId: "run-1",
+      eventSinkUrl: "https://nodes.example/api/agents/runtime-events",
+    }, { id: "event-1" })).resolves.toBe(false);
+    expect(disabledFetch).not.toHaveBeenCalled();
+  });
+});
+`)
+
+          replaceOnce(
+            'lib/agents/codex/runner-client.ts',
+            'import { runAgentRuntimeStartPipeline } from "@/lib/agents/runtime/kernel";\n',
+            'import { runAgentRuntimeStartPipeline } from "@/lib/agents/runtime/kernel";\nimport { getAgentRuntimeEventSinkUrl } from "@/lib/server/agent-runtime-event-sink-url";\n',
+          )
+          replaceOnce(
+            'lib/agents/codex/runner-client.ts',
+            '        journalId: prepared.journal.identity.journalId,\n',
+            '        journalId: prepared.journal.identity.journalId,\n        eventSinkUrl: getAgentRuntimeEventSinkUrl(),\n',
+          )
+
+          replaceOnce(
+            'lib/agents/nooa/runner-client.ts',
+            'import { runAgentRuntimeStartPipeline } from "@/lib/agents/runtime/kernel";\n',
+            'import { runAgentRuntimeStartPipeline } from "@/lib/agents/runtime/kernel";\nimport { getAgentRuntimeEventSinkUrl } from "@/lib/server/agent-runtime-event-sink-url";\n',
+          )
+          replaceOnce(
+            'lib/agents/nooa/runner-client.ts',
+            '          journalId: prepared.journal.identity.journalId,\n',
+            '          journalId: prepared.journal.identity.journalId,\n          eventSinkUrl: getAgentRuntimeEventSinkUrl(),\n',
+          )
+
+          replaceOnce(
+            'services/codex-runner/server.mjs',
+            'import { materializeWorkspaceFiles } from "./workspace-artifacts.mjs";\n',
+            'import { materializeWorkspaceFiles } from "./workspace-artifacts.mjs";\nimport { createRuntimeEventSink } from "../runtime-event-sink.mjs";\n',
+          )
+          replaceOnce(
+            'services/codex-runner/server.mjs',
+            'const approvals = new Map();\n\nconst isRecord',
+            'const approvals = new Map();\nconst runtimeEventSink = createRuntimeEventSink({ runtime: "codex", runnerToken: RUNNER_TOKEN });\n\nconst isRecord',
+          )
+          replaceOnce(
+            'services/codex-runner/server.mjs',
+            '  for (const subscriber of run.subscribers) writeSse(subscriber, envelope);\n  return envelope;\n',
+            '  for (const subscriber of run.subscribers) writeSse(subscriber, envelope);\n  void runtimeEventSink.enqueue(run, envelope);\n  return envelope;\n',
+          )
+          replaceOnce(
+            'services/codex-runner/server.mjs',
+            '    projectId: input.projectId || null,\n    workspaceId:',
+            '    projectId: input.projectId || null,\n    journalId: input.journalId || null,\n    eventSinkUrl: input.eventSinkUrl || null,\n    workspaceId:',
+          )
+          replaceOnce(
+            'services/codex-runner/server.mjs',
+            '    projectId: parentRun.projectId,\n    workspaceId: parentRun.workspaceId,',
+            '    projectId: parentRun.projectId,\n    journalId: parentRun.journalId,\n    eventSinkUrl: parentRun.eventSinkUrl,\n    workspaceId: parentRun.workspaceId,',
+          )
+          replaceOnce(
+            'services/codex-runner/server.mjs',
+            'projectId: asString(body.projectId), workspaceId: workspace.workspaceId,',
+            'projectId: asString(body.projectId), journalId: getNestedString(body, ["metadata", "nodesKernel", "journalId"]), eventSinkUrl: getNestedString(body, ["metadata", "nodesKernel", "eventSinkUrl"]), workspaceId: workspace.workspaceId,',
+          )
+
+          replaceOnce(
+            'services/nooa-runner/server.mjs',
+            '} from "./runtime.mjs";\n',
+            '} from "./runtime.mjs";\nimport { createRuntimeEventSink } from "../runtime-event-sink.mjs";\n',
+          )
+          replaceOnce(
+            'services/nooa-runner/server.mjs',
+            'const runs = new Map();\n\nconst terminalStatuses',
+            'const runs = new Map();\nconst runtimeEventSink = createRuntimeEventSink({ runtime: "nooa", runnerToken: RUNNER_TOKEN });\n\nconst terminalStatuses',
+          )
+          replaceOnce(
+            'services/nooa-runner/server.mjs',
+            '  for (const subscriber of run.subscribers) writeSse(subscriber, event);\n  return event;\n',
+            '  for (const subscriber of run.subscribers) writeSse(subscriber, event);\n  void runtimeEventSink.enqueue(run, event);\n  return event;\n',
+          )
+          replaceOnce(
+            'services/nooa-runner/server.mjs',
+            'function makeRunRecord({ runId, ownerId, input, workspace, policy, inputPath }) {',
+            'function makeRunRecord({ runId, ownerId, input, workspace, policy, inputPath, kernel }) {',
+          )
+          replaceOnce(
+            'services/nooa-runner/server.mjs',
+            '    projectId: input.projectId,\n    workspaceId:',
+            '    projectId: input.projectId,\n    journalId: kernel.journalId,\n    eventSinkUrl: kernel.eventSinkUrl,\n    workspaceId:',
+          )
+          replaceOnce(
+            'services/nooa-runner/server.mjs',
+            '  const input = normalizeNooaRun(body.run);\n',
+            '  const rawRun = isRecord(body.run) ? body.run : {};\n  const rawMetadata = isRecord(rawRun.metadata) ? rawRun.metadata : {};\n  const nodesKernel = isRecord(rawMetadata.nodesKernel) ? rawMetadata.nodesKernel : {};\n  const input = normalizeNooaRun(body.run);\n',
+          )
+          replaceOnce(
+            'services/nooa-runner/server.mjs',
+            '  const run = makeRunRecord({ runId, ownerId, input, workspace, policy, inputPath });\n',
+            '  const run = makeRunRecord({\n    runId, ownerId, input, workspace, policy, inputPath,\n    kernel: {\n      journalId: asString(nodesKernel.journalId),\n      eventSinkUrl: asString(nodesKernel.eventSinkUrl),\n    },\n  });\n',
+          )
+
+          replaceOnce(
+            '.env.example',
+            '# Shared secret between Nodes and the local NOOA runner.\nNOOA_RUNNER_TOKEN=\n',
+            '# Shared secret between Nodes and the local NOOA runner.\nNOOA_RUNNER_TOKEN=\n\n# Optional explicit callback endpoint for trusted runners to push runtime events.\n# When empty, Nodes derives /api/agents/runtime-events from NEXTAUTH_URL or VERCEL_URL.\nNODES_RUNTIME_EVENT_SINK_URL=\n',
+          )
+          NODE
+
+      - name: Validate implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --fund=false
+          node --check services/runtime-event-sink.mjs
+          node --check services/codex-runner/server.mjs
+          node --check services/nooa-runner/server.mjs
+          npm run typecheck
+          npx vitest run tests/runtime-event-sink.test.js tests/agent-stream-journal.test.ts
+          npm run audit:production
+          git diff --check
+
+      - name: Commit implementation and remove this one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -- .github/workflows/apply-runtime-event-ingestion.yml
+          git add -- \
+            .env.example \
+            app/api/agents/runtime-events/route.ts \
+            lib/agents/codex/runner-client.ts \
+            lib/agents/nooa/runner-client.ts \
+            lib/server/agent-runtime-event-sink-url.ts \
+            services/codex-runner/server.mjs \
+            services/nooa-runner/server.mjs \
+            services/runtime-event-sink.mjs \
+            tests/runtime-event-sink.test.js
+          git diff --cached --check
+          git commit -m "feat(agents): add server-owned runtime event ingestion"
+          git push origin HEAD:main
