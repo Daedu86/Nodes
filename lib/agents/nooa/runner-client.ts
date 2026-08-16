@@ -1,3 +1,4 @@
+import { runAgentRuntimeStartPipeline } from "@/lib/agents/runtime/kernel";
 import type {
   AgentRuntimeRunStatus,
   AgentRuntimeStartRequest,
@@ -61,7 +62,7 @@ const RUN_STATUSES = new Set<AgentRuntimeRunStatus>([
   "cancelled",
 ]);
 
-export async function startNooaRun(
+async function startNooaRunDirect(
   input: AgentRuntimeStartRequest,
 ): Promise<AgentRuntimeStartResponse> {
   const response = await runnerFetch(input.ownerId, "/v1/runs", {
@@ -88,6 +89,12 @@ export async function startNooaRun(
     providerRunId: typeof body.providerRunId === "string" ? body.providerRunId : null,
     threadId: typeof body.threadId === "string" ? body.threadId : null,
   };
+}
+
+export async function startNooaRun(
+  input: AgentRuntimeStartRequest,
+): Promise<AgentRuntimeStartResponse> {
+  return runAgentRuntimeStartPipeline("nooa", input, startNooaRunDirect);
 }
 
 export async function streamNooaRunEvents(

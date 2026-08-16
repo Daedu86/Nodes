@@ -1,0 +1,80 @@
+import { AgentKernel } from "@/lib/agents/kernel/kernel";
+import { AgentSessionLog } from "@/lib/agents/kernel/session-log";
+import { AgentToolRegistry } from "@/lib/agents/kernel/tools";
+
+export const AGENT_KERNEL_CAPABILITIES = {
+  tools: "agent.tools",
+  sessionLogFactory: "agent.session-log-factory",
+} as const;
+
+export const AGENT_RUNTIME_INTERCEPTORS = {
+  start: "runtime.start",
+} as const;
+
+export const AGENT_RUNTIME_EVENTS = {
+  starting: "runtime.starting",
+  started: "runtime.started",
+  failed: "runtime.start.failed",
+} as const;
+
+export type AgentSessionLogFactory = {
+  create: () => AgentSessionLog;
+};
+
+export type AgentRuntimeStartEnvelope<TRequest = unknown> = {
+  runtime: string;
+  request: TRequest;
+};
+
+let runtimeKernel: AgentKernel | null = null;
+
+export function createAgentRuntimeKernel() {
+  const kernel = new AgentKernel();
+  kernel.mount({
+    id: "nodes.agent-core",
+    apply(context) {
+      context.provide(AGENT_KERNEL_CAPABILITIES.tools, new AgentToolRegistry());
+      context.provide<AgentSessionLogFactory>(AGENT_KERNEL_CAPABILITIES.sessionLogFactory, {
+        create: () => new AgentSessionLog(),
+      });
+    },
+  });
+  return kernel;
+}
+
+export function getAgentRuntimeKernel() {
+  runtimeKernel ??= createAgentRuntimeKernel();
+  return runtimeKernel;
+}
+
+/**
+ * Shared runtime-start seam. Plugins can observe or wrap a request without a
+ * provider-specific import. In the absence of interceptors this is a no-op
+ * around the existing runner client, preserving current behavior.
+ */
+export async function runAgentRuntimeStartPipeline<TRequest, TResponse>(
+  runtime: string,
+  request: TRequest,
+  terminal: (request: TRequest) => Promise<TResponse>,
+  kernel: AgentKernel = getAgentRuntimeKernel(),
+): Promise<TResponse> {
+  const envelope: AgentRuntimeStartEnvelope<TRequest> = { runtime, request };
+  await kernel.emit(AGENT_RUNTIME_EVENTS.starting, envelope);
+
+  try {
+    const response = await kernel.runWaterfall<AgentRuntimeStartEnvelope<TRequest>, TResponse>(
+      AGENT_RUNTIME_INTERCEPTORS.start,
+      envelope,
+      (current) => terminal(current.request),
+    );
+    await kernel.emit(AGENT_RUNTIME_EVENTS.started, { runtime, request, response });
+    return response;
+  } catch (error) {
+    await kernel.emit(AGENT_RUNTIME_EVENTS.failed, {
+      runtime,
+      request,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
