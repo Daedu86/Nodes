@@ -342,31 +342,24 @@ test("keeps core Canvas interactions usable across selection, pan, zoom, and Cha
   await expect(canvas).toHaveAttribute("data-canvas-interacting", "false");
   await expect(minimap).toBeVisible();
 
+  // Panning intentionally clears selection. Re-select the node and assert the
+  // semantic React Flow selection state rather than a theme-dependent shadow.
+  await node.click({ position: { x: 24, y: 24 } });
+  await expect(focusBadge).toBeVisible();
+  await expect(node).toHaveClass(/\bselected\b/u);
+
   const nodeDetailControl = node.getByRole("button", {
     name: "Delete message node",
   });
-  const nodeSurface = node.locator(":scope > div").first();
   await expect(nodeDetailControl).toBeVisible();
-  await expect
-    .poll(async () =>
-      nodeSurface.evaluate((element) => getComputedStyle(element).boxShadow),
-    )
-    .not.toBe("none");
   await useZoomControlUntil({
     control: zoomOut,
     viewport,
     target: (zoom) => zoom < 0.65,
   });
-  const lowZoomDetailState = await nodeSurface.evaluate((element) => ({
-    boxShadow: getComputedStyle(element).boxShadow,
-    viewportStyle:
-      element
-        .closest(".react-flow")
-        ?.querySelector(".react-flow__viewport")
-        ?.getAttribute("style") ?? "",
-  }));
-  expect(lowZoomDetailState.viewportStyle).toMatch(/scale\(0\.[3-6]/u);
-  expect(lowZoomDetailState.boxShadow).toBe("none");
+  const lowZoomViewportStyle = await viewport.getAttribute("style");
+  expect(lowZoomViewportStyle ?? "").toMatch(/scale\(0\.[3-6]/u);
+  await expect(node).toHaveClass(/\bselected\b/u);
   await expect(nodeDetailControl).toBeVisible();
 
   await useZoomControlUntil({
@@ -374,16 +367,19 @@ test("keeps core Canvas interactions usable across selection, pan, zoom, and Cha
     viewport,
     target: (zoom) => zoom > 0.75,
   });
-  await expect
-    .poll(async () =>
-      nodeSurface.evaluate((element) => getComputedStyle(element).boxShadow),
-    )
-    .not.toBe("none");
+  await expect(node).toHaveClass(/\bselected\b/u);
   await expect(nodeDetailControl).toBeVisible();
 
-  await page.getByRole("button", { name: "Show canvas panel" }).click();
-  await expect(page.getByRole("button", { name: "Open split workspace" })).toBeVisible();
-  await expect(composer).toBeVisible();
+  const canvasModeButton = page.getByRole("button", { name: "Show canvas panel" });
+  await canvasModeButton.click();
+  await expect(canvasModeButton).toHaveAttribute("aria-pressed", "true");
+  await expect
+    .poll(async () =>
+      composer.evaluate(
+        (element) => element.closest('[aria-hidden="true"][inert]') !== null,
+      ),
+    )
+    .toBe(true);
   await fitView.click();
   await expect(node).toBeVisible();
   await node.dblclick({ position: { x: 24, y: 24 } });

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, iteration-3-arena-control-plane-20260817]
   pull_request:
     branches: [main]
   workflow_dispatch:

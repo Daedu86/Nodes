@@ -8,7 +8,7 @@ import {
   type ProjectMemorySourceKind,
   type ProjectMemoryType,
 } from "@/lib/memory-documents";
-import { getProject } from "@/lib/project-store";
+import { getProject, patchProject } from "@/lib/project-store";
 import { getSession } from "@/lib/session-store";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
 
@@ -61,13 +61,12 @@ export async function POST(req: Request) {
       ? body.sourceSessionId
       : null;
 
-  let resolvedProjectId: string | null = null;
+  let resolvedProject: Awaited<ReturnType<typeof getProject>> | null = null;
   if (sourceProjectId) {
     try {
-      const project = await getProject(sourceProjectId, guarded.user.id);
-      resolvedProjectId = project.id;
+      resolvedProject = await getProject(sourceProjectId, guarded.user.id);
     } catch {
-      resolvedProjectId = null;
+      resolvedProject = null;
     }
   }
 
@@ -84,7 +83,7 @@ export async function POST(req: Request) {
   const item = await createMemoryItem({
     content,
     ownerId: guarded.user.id,
-    sourceProjectId: resolvedProjectId,
+    sourceProjectId: resolvedProject?.id ?? null,
     sourceKeys: Array.isArray(body.sourceKeys)
       ? body.sourceKeys.filter((value): value is string => typeof value === "string" && value.length > 0)
       : [],
@@ -96,6 +95,18 @@ export async function POST(req: Request) {
     title,
     type,
   });
+
+  if (resolvedProject) {
+    const currentProject = await getProject(resolvedProject.id, guarded.user.id);
+    if (!currentProject.memoryIds.includes(item.id)) {
+      await patchProject(
+        currentProject.id,
+        { memoryIds: [...currentProject.memoryIds, item.id] },
+        guarded.user.id,
+      );
+    }
+  }
+
   return Response.json({ item }, { status: 201 });
 }
 
