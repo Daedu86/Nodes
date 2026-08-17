@@ -342,6 +342,12 @@ test("keeps core Canvas interactions usable across selection, pan, zoom, and Cha
   await expect(canvas).toHaveAttribute("data-canvas-interacting", "false");
   await expect(minimap).toBeVisible();
 
+  // Panning intentionally clears selection. Re-select the node before asserting
+  // selection-specific detail styling so the test observes an explicit state,
+  // not whichever selection state the React Flow gesture happened to leave.
+  await node.click({ position: { x: 24, y: 24 } });
+  await expect(focusBadge).toBeVisible();
+
   const nodeDetailControl = node.getByRole("button", {
     name: "Delete message node",
   });
