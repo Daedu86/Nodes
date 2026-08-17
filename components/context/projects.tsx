@@ -270,15 +270,20 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
   }, [updateKnownProject]);
 
   const saveActiveProjectPatch = React.useCallback((patch: ProjectUpdatePatch) => {
+    const baseMemoryIds = patch.memoryIds
+      ? [...(activeProjectRef.current?.memoryIds ?? [])]
+      : null;
+
     const enqueue = async () => {
       const currentProject = activeProjectRef.current;
       const projectId = currentProject?.id;
       if (!projectId) return null;
       const effectivePatch =
-        currentProject && patch.memoryIds
+        currentProject && patch.memoryIds && baseMemoryIds
           ? {
               ...patch,
               memoryIds: reconcileQueuedResourceIds(
+                baseMemoryIds,
                 currentProject.memoryIds,
                 patch.memoryIds,
               ),
