@@ -128,6 +128,31 @@ export const writeStoredResourceId = (
 export const dedupeResourceIds = (resourceIds: string[]) =>
   [...new Set(resourceIds)].filter((resourceId) => resourceId.length > 0);
 
+/**
+ * Reconciles a queued list patch against the latest authoritative list.
+ *
+ * UI callers often construct an addition from render-time state, while the
+ * serialized request queue may already have committed another addition. If
+ * the requested list contains at least one new id, treat it as an additive
+ * mutation and preserve ids that are already authoritative. A patch with no
+ * new ids remains a replacement so detach/delete operations can still remove
+ * entries intentionally.
+ */
+export function reconcileQueuedResourceIds(
+  currentResourceIds: string[],
+  requestedResourceIds: string[],
+) {
+  const current = dedupeResourceIds(currentResourceIds);
+  const requested = dedupeResourceIds(requestedResourceIds);
+  const containsAddition = requested.some(
+    (resourceId) => !current.includes(resourceId),
+  );
+
+  return containsAddition
+    ? dedupeResourceIds([...current, ...requested])
+    : requested;
+}
+
 export function replaceResourceById<T extends { id: string }>(
   resources: T[],
   resource: T,
