@@ -1,3 +1,5 @@
+import { getAgentHandle } from "@/lib/agents/runtime/handle";
+import { markExperimentRunCancelled } from "@/lib/agent-experiments";
 import { getProjectForUser, ProjectAccessError } from "@/lib/project-collaboration";
 import {
   buildProjectArenaExperimentEntries,
@@ -16,6 +18,7 @@ type RouteParams = {
 type ExperimentControlRequest = {
   action?: unknown;
   experimentId?: unknown;
+  candidateId?: unknown;
 };
 
 export const runtime = "nodejs";
@@ -37,7 +40,7 @@ async function requireOwnedProject(
 /**
  * Experiment journals are owner-bound agent evidence. Collaborators may compare
  * normal project sessions, but only the project owner can currently inspect or
- * promote the underlying agent experiment telemetry through this endpoint.
+ * control the underlying agent experiment telemetry through this endpoint.
  */
 export async function GET(req: Request, context: RouteParams) {
   const guarded = await requireLocalApiUser(req);
@@ -70,10 +73,21 @@ export async function POST(req: Request, context: RouteParams) {
   const action = typeof body?.action === "string" ? body.action.trim() : "";
   const experimentId =
     typeof body?.experimentId === "string" ? body.experimentId.trim() : "";
+  const candidateId =
+    typeof body?.candidateId === "string" ? body.candidateId.trim() : "";
 
-  if (action !== "promote-best" || !experimentId) {
+  if (!experimentId || !["promote-best", "cancel-candidate"].includes(action)) {
     return Response.json(
-      { error: "Expected action 'promote-best' and a non-empty experimentId." },
+      {
+        error:
+          "Expected action 'promote-best' or 'cancel-candidate' and a non-empty experimentId.",
+      },
+      { status: 400 },
+    );
+  }
+  if (action === "cancel-candidate" && !candidateId) {
+    return Response.json(
+      { error: "cancel-candidate requires a non-empty candidateId." },
       { status: 400 },
     );
   }
@@ -89,6 +103,43 @@ export async function POST(req: Request, context: RouteParams) {
     );
     if (experimentRecords.length === 0) {
       return Response.json({ error: "Experiment not found." }, { status: 404 });
+    }
+
+    if (action === "cancel-candidate") {
+      const record = experimentRecords.find(
+        (candidate) => candidate.candidateId === candidateId,
+      );
+      if (!record) {
+        return Response.json({ error: "Experiment candidate not found." }, { status: 404 });
+      }
+      if (record.status !== "running" || !record.runId) {
+        return Response.json(
+          { error: "Only a running candidate with a bound runtime run can be cancelled." },
+          { status: 409 },
+        );
+      }
+
+      await getAgentHandle(record.runtime, {
+        ownerId: guarded.user.id,
+        runId: record.runId,
+      }).cancel();
+      const cancelled = markExperimentRunCancelled(record);
+      await persistExperimentRun({ ownerId: guarded.user.id, record: cancelled });
+
+      const records = projectRecords.map((candidate) =>
+        candidate.experimentId === experimentId && candidate.candidateId === candidateId
+          ? cancelled
+          : candidate,
+      );
+      return Response.json({
+        cancelled: {
+          experimentId: cancelled.experimentId,
+          candidateId: cancelled.candidateId,
+          runId: cancelled.runId,
+        },
+        records,
+        entries: buildProjectArenaExperimentEntries(records),
+      });
     }
 
     const promotion = buildProjectArenaPromotion(experimentRecords);
@@ -125,7 +176,7 @@ export async function POST(req: Request, context: RouteParams) {
       return new Response(error.message, { status: error.status });
     }
     return Response.json(
-      { error: error instanceof Error ? error.message : "Experiment promotion failed." },
+      { error: error instanceof Error ? error.message : "Experiment control failed." },
       { status: 500 },
     );
   }
