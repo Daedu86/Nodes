@@ -11,6 +11,8 @@ import { focusCanvasMessageBranch } from "@/lib/canvas-chat-navigation";
 
 export const ChatPanel = () => {
   const runtime = useAssistantRuntime();
+  const runtimeRef = React.useRef(runtime);
+  runtimeRef.current = runtime;
   const { draft } = useGraphBranchIntent();
   const {
     focusedMessageId,
@@ -24,7 +26,7 @@ export const ChatPanel = () => {
   const revealMessageInChat = React.useCallback(
     (messageId: string) => {
       if (!messageId || messageId === ROOT_NODE_ID) return;
-      const thread = runtime.threads.main;
+      const thread = runtimeRef.current.threads.main;
       try {
         const isAlreadyVisible = thread
           .getState()
@@ -44,7 +46,7 @@ export const ChatPanel = () => {
       setViewMode("split");
       scrollMessageIntoView(messageId, 40);
     },
-    [runtime.threads.main, setSplitPaneOpen, setViewMode],
+    [setSplitPaneOpen, setViewMode],
   );
 
   React.useEffect(() => {
