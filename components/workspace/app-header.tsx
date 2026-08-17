@@ -23,7 +23,12 @@ import { WorkspaceOnboardingDialog } from "@/components/workspace/workspace-onbo
 export const AppHeader = () => {
   const { llmEnabled } = useLlmEnabled();
   const { data: session } = useSession();
-  const { viewMode, setViewMode, toggleSplitView } = useSessionUiState();
+  const {
+    setFocusedMessageId,
+    setViewMode,
+    toggleSplitView,
+    viewMode,
+  } = useSessionUiState();
 
   const viewOptions: Array<{
     icon: typeof MessageSquareText;
@@ -41,9 +46,15 @@ export const AppHeader = () => {
         toggleSplitView();
         return;
       }
+      if (value === "canvas") {
+        // Canvas selection and Chat reveal intent are distinct. A user explicitly
+        // choosing Canvas-only mode should keep the selected node highlighted
+        // without an old focused message immediately forcing the UI back to Split.
+        setFocusedMessageId(null);
+      }
       setViewMode(value);
     },
-    [setViewMode, toggleSplitView],
+    [setFocusedMessageId, setViewMode, toggleSplitView],
   );
 
   return (
