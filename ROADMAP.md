@@ -28,6 +28,8 @@ This roadmap communicates direction, not delivery guarantees. Priorities may cha
 - [x] Provider-neutral durable agent status, metrics, compaction, resume, and fork across Codex and NOOA.
 - [x] Append-only experiment records with Champion/Challenger lineage and Tycho evaluation provenance.
 - [x] Arena experiment projection with explicit quality, cost, latency, token, and promotion evidence.
+- [x] Evidence-gated Arena promotion controls that require complete terminal Tycho, cost, and latency evidence.
+- [x] Serialized project attachment reconciliation that prevents stale additive `memoryIds` patches from dropping already-confirmed typed nodes.
 - [x] Monotonic scoped agent policy resolution across global, project, agent, and execution scopes.
 
 ## Now — product readiness
@@ -42,7 +44,8 @@ The current focus is making the product understandable, reliable, and evaluable 
 - [x] Add reusable starter projects for product discovery, research synthesis, technical design, and writing.
 - [ ] Verify and publish a stable public demo URL with a controlled demo account or read-only experience.
 - [ ] Extend onboarding through Arena winner selection and project memory reuse.
-- [ ] Bind the durable experiment/Arena projection into the interactive Arena launch and promotion controls.
+- [x] Bind durable experiment evidence into interactive Arena promotion controls.
+- [ ] Launch new durable challengers directly from Arena while continuing to use the existing Codex/NOOA runner authority and durable evolution lifecycle.
 - [ ] Complete manual keyboard and screen-reader review for Arena and project flows.
 - [ ] Improve responsive behavior for smaller laptop and tablet layouts.
 
