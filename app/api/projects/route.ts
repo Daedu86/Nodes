@@ -8,6 +8,10 @@ import {
 } from "@/lib/project-collaboration";
 import { filterProjectMapSessions, getProjectMapSessionIds, normalizeProjectMap } from "@/lib/project-map";
 import { createProjectMapForTitle } from "@/lib/project-map-templates";
+import {
+  getProjectStarterTemplate,
+  type ProjectStarterTemplateId,
+} from "@/lib/project-starter-templates";
 import { listMemoryItems } from "@/lib/memory-store";
 import { listSessions } from "@/lib/session-store";
 import { requireLocalApiUser } from "@/lib/server/request-guards";
@@ -18,6 +22,7 @@ type CreateProjectBody = {
   globalContext?: string;
   map?: unknown;
   sessionIds?: unknown;
+  templateId?: unknown;
   title?: string | null;
 };
 
@@ -47,6 +52,13 @@ export async function POST(req: Request) {
   const requestedMemoryIds = Array.isArray(body.memoryIds)
     ? body.memoryIds.filter((value): value is string => typeof value === "string" && value.length > 0)
     : [];
+  const requestedTemplate = typeof body.templateId === "string"
+    ? getProjectStarterTemplate(body.templateId as ProjectStarterTemplateId)
+    : null;
+  if (body.templateId !== undefined && !requestedTemplate) {
+    return new Response("Unknown project template", { status: 400 });
+  }
+
   const [sessions, memoryItems] = await Promise.all([
     listSessions({ includeArchived: true, ownerId: guarded.user.id }),
     listMemoryItems({ ownerId: guarded.user.id }),
@@ -56,7 +68,7 @@ export async function POST(req: Request) {
   const validRequestedSessionIds = requestedSessionIds.filter((sessionId) => allowedSessionIds.has(sessionId));
   const requestedMap = filterProjectMapSessions(body.map, allowedSessionIds);
   const seededMap = body.map === undefined
-    ? createProjectMapForTitle(body.title ?? null)
+    ? requestedTemplate?.create() ?? createProjectMapForTitle(body.title ?? null)
     : requestedMap;
   const map = seededMap.nodes.length > 0 && validRequestedSessionIds.length > 0 && getProjectMapSessionIds(seededMap).length === 0
     ? normalizeProjectMap({
@@ -80,7 +92,7 @@ export async function POST(req: Request) {
     map,
     memoryIds,
     sessionIds,
-    title: body.title ?? null,
+    title: body.title ?? requestedTemplate?.title ?? null,
   }, guarded.user);
 
   if (guarded.user.isAgent) {
@@ -94,7 +106,12 @@ export async function POST(req: Request) {
       method: "POST",
       route: "/api/projects",
       projectId: project.id,
-      payload: { sessionIds, memoryIds, mapNodeCount: map.nodes.length },
+      payload: {
+        sessionIds,
+        memoryIds,
+        mapNodeCount: map.nodes.length,
+        templateId: requestedTemplate?.id ?? null,
+      },
     });
   }
   return Response.json({ project }, { status: 201 });

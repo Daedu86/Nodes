@@ -12,13 +12,17 @@ Canvas / Project Map / Arena
             v
       Nodes control plane
             |
+   experiments / Tycho gates
+            |
             v
        Agent kernel
    +--------+---------+
    | plugins/capabilities
    | request assembly
+   | scoped policy
    | runtime waterfalls
    | lifecycle handles
+   | durable metrics
    | runtime event ingestion
    | durable runner outbox
    | tool registry
@@ -65,13 +69,14 @@ Both Codex and NOOA starts pass through the shared `runtime.start` waterfall. Li
 Post-start lifecycle is exposed through `AgentHandle`:
 
 - `status()` from the durable journal;
+- `metrics()` from durable journal facts such as tokens, compaction, tools, approvals and continuation count;
 - `waitUntilIdle()` with timeout and cancellation;
 - `resume()` / `fork()` create typed durable-continuation descriptors for the next explicit start;
 - `cancel()`;
 - `openEventStream()`;
 - `resolveApproval()` when the provider supports approvals.
 
-Capabilities are declared by runtime. Codex currently exposes cancel, event streaming and approvals; NOOA exposes cancel and event streaming. Requesting an unsupported capability fails loudly with `UNSUPPORTED_CAPABILITY` instead of silently degrading.
+Capabilities are declared by runtime. Codex currently exposes cancel, event streaming and approvals; NOOA exposes cancel and event streaming. Durable status, metrics, wait, resume and fork are Nodes-owned cross-provider capabilities. Requesting an unsupported runtime capability fails loudly with `UNSUPPORTED_CAPABILITY` instead of silently degrading.
 
 Provider-specific control-plane operations that are not common lifecycle semantics remain on their provider clients.
 
@@ -132,7 +137,7 @@ The runner delivery queue is serialized by `journalId`, not by provider `runId`.
 
 ### Durable runner outbox
 
-Callback-owned runners now place each event in a disk outbox before forwarding it to live SSE subscribers. The stable outbox filename is derived from runtime, journal id and upstream event id, so retrying the same event reuses one pending record. Writes use a temporary file plus atomic rename; newly created outbox directories use mode `0700` and event files use mode `0600`. Runner credentials are never stored in an outbox record.
+Callback-owned runners place each event in a disk outbox before forwarding it to live SSE subscribers. The stable outbox filename is derived from runtime, journal id and upstream event id, so retrying the same event reuses one pending record. Writes use a temporary file plus atomic rename; newly created outbox directories use mode `0700` and event files use mode `0600`. Runner credentials are never stored in an outbox record.
 
 The callback entry is deleted only after Nodes acknowledges it with a successful HTTP response. Network failures, HTTP 429 and server errors are retried in-process; if delivery is still unsuccessful, the file remains pending. On runner startup, `recover()` scans the durable outbox, validates stored entries, orders them by original queue time/ordinal and resubmits them through the same per-journal serialization queue. Because the Nodes projection boundary deduplicates by upstream event id, a crash after server ACK but before local deletion safely produces an idempotent replay rather than duplicate model-visible history.
 
@@ -146,7 +151,7 @@ The current outbox is process-restart durable when its underlying filesystem sur
 
 `AgentContextCompactor` is provider-neutral. It receives an injected token estimator and summarizer, selects an old prefix while retaining a bounded recent tail, verifies that the proposed checkpoint reduces estimated context, then appends a provenance-preserving replacement plus a log-only compaction record.
 
-Runtime journal projection now checks compaction automatically after model-visible assistant messages and tool results. If the canonical request advertises a `contextWindow`, Nodes compacts at 80% pressure; otherwise it uses a 12k-token maintenance fallback. The default estimator reuses Nodes' deterministic character heuristic (`nodes.chars-per-4-v1`) and the default summarizer is a bounded local structural/extractive checkpoint (`nodes.structural-extractive-v1`). Automatic maintenance therefore makes no hidden provider call, consumes no user model credits, and does not bypass chat quota/audit. Both remain replaceable behind the compactor seam.
+Runtime journal projection checks compaction automatically after model-visible assistant messages and tool results. If the canonical request advertises a `contextWindow`, Nodes compacts at 80% pressure; otherwise it uses a 12k-token maintenance fallback. The default estimator reuses Nodes' deterministic character heuristic (`nodes.chars-per-4-v1`) and the default summarizer is a bounded local structural/extractive checkpoint (`nodes.structural-extractive-v1`). Automatic maintenance therefore makes no hidden provider call, consumes no user model credits, and does not bypass chat quota/audit. Both remain replaceable behind the compactor seam.
 
 This compacts Nodes' durable model-visible replay surface. It does not mutate an opaque provider-owned live thread. Durable resume/fork consumes this compacted surface through an explicit replay seam described below.
 
@@ -160,6 +165,64 @@ The new execution receives a fresh journal. Its first event is `continuation.sou
 
 Because current Codex and NOOA runner starts accept a flattened prompt rather than a provider-neutral message-history API, Nodes also renders the copied surface as the authoritative `nodes:durable-continuation-replay` request section. The section explicitly states that this is a Nodes-owned replay and **not** proof of provider-native thread resumption. Provider-private state outside the durable transcript is intentionally not assumed. A future adapter may map this seam to a true provider resume token only when that provider exposes semantics Nodes can verify.
 
+## 9. Scoped policy capability
+
+Reusable policy is resolved as a declarative kernel capability across four ordered scopes:
+
+```text
+global -> project -> agent -> execution
+```
+
+Each scope may constrain approval modes, sandbox policy ids, visible tool names and authorized workspace paths. Resolution is monotonic: a child scope intersects its allow-list with the effective parent set. `undefined` means inherit; an explicit empty list means deny all. A narrower scope therefore cannot silently re-add a permission already removed by a broader scope.
+
+`agent.policy-resolver` exposes both resolution and a fail-closed assertion helper. This does **not** move enforcement into the kernel: the trusted runner/OpenShell remains the authority that enforces filesystem, network, subprocess, sandbox and credential boundaries. The kernel capability makes intended policy composable and auditable before dispatch.
+
+## 10. Durable runtime observability
+
+`agent.metrics-collector` and `AgentHandle.metrics()` project operational facts from the durable journal without provider-specific parsing. The current projection includes:
+
+- first/last journal event and elapsed duration;
+- model input/output token counts when reported;
+- context compaction count and estimated tokens saved;
+- tool calls and tool errors;
+- approval requests;
+- interrupted turns;
+- continuation count.
+
+These metrics deliberately do not invent runner-local state. Callback retry counts, current durable-outbox depth and similar infrastructure gauges must come from a runner telemetry adapter until those facts are journaled. This separation keeps Arena/Tycho evidence reproducible while allowing infrastructure telemetry to evolve independently.
+
+## 11. Arena experimental runtime
+
+Arena experiments use the durable continuation seam instead of maintaining a second branching system. `buildArenaExperimentPlan()` receives a champion `AgentHandle` and creates one `fork()` descriptor per challenger. Challengers can target Codex or NOOA and may use independent sessions while retaining champion runtime/run lineage, model metadata and a stable experiment/candidate identity.
+
+`experimentPlanToTychoVariants()` projects those start requests into the existing Tycho variant contract. Tycho remains the empirical quality authority: `applyTychoEvaluation()` always derives `qualityScore` from Tycho's verified `evaluation.score`. Operational cost, latency and token evidence can be attached from Tycho metrics or `AgentHandle.metrics()`.
+
+Each `ExperimentRunRecord` is a first-class durable snapshot containing candidate/runtime/model/prompt identity, parent/source run lineage, journal/run ids, lifecycle state, quality/cost/latency/token metrics, Tycho evaluation and promotion outcome. `persistExperimentRun()` stores append-only snapshots through the existing `AgentWorkRepository`, so both file and Supabase backends use the same persistence path. Loading selects the latest snapshot for each candidate without deleting the earlier evidence.
+
+Project Arena can project these records through `buildProjectArenaExperimentEntries()` and display quality, cost, latency, tokens and explicit utility together. The default utility weights are 0.70 quality, 0.15 cost and 0.15 latency; callers can configure them. Candidates missing a metric that currently has non-zero weight are not eligible for utility promotion, preventing an unmetered run from winning by omission. Ranking is advisory: `recordExperimentPromotion()` is a separate operation so Tycho, safety and business gates can still block a numerically leading challenger.
+
+This closes the substrate loop:
+
+```text
+Champion durable run
+        |
+        +--> fork A --> Codex/NOOA --> evidence --+
+        +--> fork B --> Codex/NOOA --> evidence --+--> Tycho evaluation
+        +--> fork C --> Codex/NOOA --> evidence --+        |
+                                                         v
+                                                 Arena comparison
+                                                         |
+                                                   promotion gate
+                                                         |
+                                                durable lineage
+```
+
+The current module/API layer supplies the reproducible experiment contract and Arena projection. Product UI can consume that adapter without learning provider-specific lifecycle semantics.
+
+## 12. Reusable project starters
+
+The project layer includes reusable starter maps for product discovery, research synthesis, technical design and writing. Project creation accepts a stable `templateId`, produces a normal `ProjectMap`, and continues to apply existing user/session ownership filtering. Templates are therefore seeds for the same Project Map/Arena workflow rather than a parallel project format.
+
 ## Core capabilities
 
 The default runtime kernel currently provides:
@@ -168,6 +231,8 @@ The default runtime kernel currently provides:
 agent.tools                -> AgentToolRegistry
 agent.session-log-factory  -> creates AgentSessionLog instances
 agent.request-assembler    -> AgentRequestAssembler
+agent.policy-resolver      -> monotonic scoped policy resolution/assertion
+agent.metrics-collector    -> durable journal metrics projection
 ```
 
 Additional capabilities should be introduced when a real cross-provider consumer exists, rather than creating speculative seams.
@@ -178,6 +243,7 @@ The kernel must preserve these existing Nodes boundaries:
 
 - browser input never resolves arbitrary host filesystem paths;
 - caller-owned policy sections cannot be silently broadened by a generic runtime client;
+- scoped child policy can restrict but cannot re-add denied parent permissions;
 - plugins do not bypass OpenShell, trusted-runner or Tycho isolation;
 - a tool policy denial is fail-closed;
 - tool arguments and results admitted to the canonical boundary are lossless JSON;
@@ -189,14 +255,15 @@ The kernel must preserve these existing Nodes boundaries:
 - callback delivery for parent/child runs sharing a journal is serialized by journal identity;
 - pending callback events are persisted without runner credentials before live SSE delivery when callback ingestion is active;
 - upstream event ids make retries and reconnects idempotent at the projection boundary;
+- experiment ranking cannot substitute for Tycho evidence or the explicit promotion gate;
 - learned M1–M8 components may choose actions, but empirical execution/evidence remains the promotion authority.
 
 ## Next migration steps
 
-1. Connect durable fork descriptors to Project Map/Arena branch creation and let Tycho remain the promotion authority for Challenger outcomes.
-2. Move reusable approval/sandbox/tool policy into scoped kernel capabilities while preserving runner enforcement boundaries.
+1. Bind the Arena experiment projection into the interactive Project Map/Arena UI and expose explicit launch/promotion controls over the existing experiment contract.
+2. Add runner-side telemetry for callback retry counts and outbox depth when operators need those gauges beside durable journal metrics.
 3. Add an optional semantic compaction summarizer only behind explicit credential, quota and audit policy; keep the local structural summarizer as the fail-safe default.
 4. Add provider-native resume tokens only for runtimes whose continuation semantics can be verified against the durable replay boundary.
 5. If deployment requirements demand power-loss-grade or cross-host delivery guarantees, add fsync/ACK checkpointing or a durable broker behind the outbox seam.
 
-The Project Map, Arena, Tycho and M1–M8 remain above this layer. The kernel exists to make the execution substrate reproducible and replaceable; it does not replace Nodes' decision and learning model.
+The Project Map, Arena, Tycho and M1–M8 remain above the agent kernel. The kernel exists to make the execution substrate reproducible, measurable and replaceable; it does not replace Nodes' decision and learning model.

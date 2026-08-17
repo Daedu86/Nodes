@@ -1,4 +1,9 @@
 import { AgentKernel } from "@/lib/agents/kernel/kernel";
+import { collectAgentRunMetrics } from "@/lib/agents/kernel/observability";
+import {
+  assertAgentPolicyAllows,
+  resolveScopedAgentPolicy,
+} from "@/lib/agents/kernel/policy";
 import { AgentRequestAssembler } from "@/lib/agents/kernel/request-assembly";
 import { AgentSessionLog } from "@/lib/agents/kernel/session-log";
 import { AgentToolRegistry } from "@/lib/agents/kernel/tools";
@@ -7,6 +12,8 @@ export const AGENT_KERNEL_CAPABILITIES = {
   tools: "agent.tools",
   sessionLogFactory: "agent.session-log-factory",
   requestAssembler: "agent.request-assembler",
+  policyResolver: "agent.policy-resolver",
+  metricsCollector: "agent.metrics-collector",
 } as const;
 
 export const AGENT_RUNTIME_INTERCEPTORS = {
@@ -43,6 +50,13 @@ export function createAgentRuntimeKernel() {
         AGENT_KERNEL_CAPABILITIES.requestAssembler,
         new AgentRequestAssembler(),
       );
+      context.provide(AGENT_KERNEL_CAPABILITIES.policyResolver, {
+        resolve: resolveScopedAgentPolicy,
+        assertAllows: assertAgentPolicyAllows,
+      });
+      context.provide(AGENT_KERNEL_CAPABILITIES.metricsCollector, {
+        collect: collectAgentRunMetrics,
+      });
     },
   });
   return kernel;

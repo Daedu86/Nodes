@@ -14,6 +14,7 @@ describe("AgentHandle", () => {
       "event_stream",
       "approvals",
       "status",
+      "metrics",
       "wait_until_idle",
       "resume",
       "fork",
@@ -22,12 +23,14 @@ describe("AgentHandle", () => {
       "cancel",
       "event_stream",
       "status",
+      "metrics",
       "wait_until_idle",
       "resume",
       "fork",
     ]);
     expect(codex.runtime).toBe("codex");
     expect(nooa.runtime).toBe("nooa");
+    expect(typeof codex.metrics).toBe("function");
     expect(codex.resume()).toEqual({
       kind: "resume",
       sourceRuntime: "codex",

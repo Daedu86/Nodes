@@ -10,6 +10,7 @@ describe("browser security policy", () => {
 
     expect(policy).toContain("default-src 'self'");
     expect(policy).toContain("script-src 'self' 'nonce-0123456789abcdef0123456789abcdef'");
+    expect(policy).toContain("https://va.vercel-scripts.com");
     expect(policy).not.toContain("'unsafe-inline' 'unsafe-eval'");
     expect(policy).not.toContain("script-src 'self' 'unsafe-inline'");
     expect(policy).toContain("object-src 'none'");
@@ -21,6 +22,7 @@ describe("browser security policy", () => {
   it("allows development evaluation only outside production", () => {
     const policy = createContentSecurityPolicy("0123456789abcdef", false);
     expect(policy).toContain("'unsafe-eval'");
+    expect(policy).toContain("https://va.vercel-scripts.com");
     expect(policy).not.toContain("upgrade-insecure-requests");
   });
 

@@ -7,6 +7,7 @@ import {
   cancelNooaRun,
   streamNooaRunEvents,
 } from "@/lib/agents/nooa/runner-client";
+import { getAgentRunMetrics, type AgentRunMetricsSnapshot } from "@/lib/agents/runtime/run-metrics";
 import type {
   AgentRuntimeApprovalDecision,
   AgentRuntimeContinuation,
@@ -24,6 +25,7 @@ export type AgentHandleCapability =
   | "event_stream"
   | "approvals"
   | "status"
+  | "metrics"
   | "wait_until_idle"
   | "resume"
   | "fork";
@@ -47,6 +49,7 @@ export type AgentHandle = {
   readonly runId: string;
   readonly capabilities: readonly AgentHandleCapability[];
   status(): Promise<AgentRunStatusSnapshot>;
+  metrics(): Promise<AgentRunMetricsSnapshot>;
   waitUntilIdle(options?: AgentWaitUntilIdleOptions): Promise<AgentRunStatusSnapshot>;
   resume(): AgentRuntimeContinuation;
   fork(): AgentRuntimeContinuation;
@@ -86,7 +89,7 @@ const cancelledPayload = async (response: Response, runId: string) => {
 
 const PROVIDERS: Record<AgentRuntimeId, AgentHandleProvider> = {
   codex: {
-    capabilities: ["cancel", "event_stream", "approvals", "status", "wait_until_idle", "resume", "fork"],
+    capabilities: ["cancel", "event_stream", "approvals", "status", "metrics", "wait_until_idle", "resume", "fork"],
     async cancel(ownerId, runId) {
       return cancelledPayload(await cancelCodexRun(ownerId, runId), runId);
     },
@@ -96,7 +99,7 @@ const PROVIDERS: Record<AgentRuntimeId, AgentHandleProvider> = {
     },
   },
   nooa: {
-    capabilities: ["cancel", "event_stream", "status", "wait_until_idle", "resume", "fork"],
+    capabilities: ["cancel", "event_stream", "status", "metrics", "wait_until_idle", "resume", "fork"],
     async cancel(ownerId, runId) {
       return cancelledPayload(await cancelNooaRun(ownerId, runId), runId);
     },
@@ -107,7 +110,8 @@ const PROVIDERS: Record<AgentRuntimeId, AgentHandleProvider> = {
 /**
  * Attach a provider-neutral lifecycle handle to an already-started runtime run.
  * Start composition stays provider-specific for now, while cancellation,
- * streaming and approvals converge on one interface used by the API layer.
+ * streaming, durable status/metrics and approvals converge on one interface used
+ * by the API layer and Arena/Tycho orchestration.
  */
 export function getAgentHandle(
   runtime: AgentRuntimeId,
@@ -125,6 +129,7 @@ export function getAgentHandle(
     runId,
     capabilities: provider.capabilities,
     status: () => getAgentRunStatus({ ownerId, runtime, runId }),
+    metrics: () => getAgentRunMetrics({ ownerId, runtime, runId }),
     waitUntilIdle: (options) =>
       waitUntilAgentRunIdle({ ownerId, runtime, runId }, options),
     resume: () => ({ kind: "resume", sourceRuntime: runtime, sourceRunId: runId }),

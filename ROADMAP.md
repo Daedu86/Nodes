@@ -25,6 +25,10 @@ This roadmap communicates direction, not delivery guarantees. Priorities may cha
 - [x] Unit, coverage, E2E, accessibility, security, bundle, and Canvas performance gates in CI.
 - [x] Per-user first-run workspace guide for the primary Chat and Canvas workflow.
 - [x] Reproducible seeded product demo for presentations and evaluations.
+- [x] Provider-neutral durable agent status, metrics, compaction, resume, and fork across Codex and NOOA.
+- [x] Append-only experiment records with Champion/Challenger lineage and Tycho evaluation provenance.
+- [x] Arena experiment projection with explicit quality, cost, latency, token, and promotion evidence.
+- [x] Monotonic scoped agent policy resolution across global, project, agent, and execution scopes.
 
 ## Now — product readiness
 
@@ -35,9 +39,10 @@ The current focus is making the product understandable, reliable, and evaluable 
 - [x] Public contribution, security, issue, and pull-request templates.
 - [x] Add per-user first-run onboarding for question → Canvas → structured context.
 - [x] Add automated axe, focus-trap, focus-restoration, and inert-panel checks in Chromium and Firefox.
+- [x] Add reusable starter projects for product discovery, research synthesis, technical design, and writing.
 - [ ] Verify and publish a stable public demo URL with a controlled demo account or read-only experience.
 - [ ] Extend onboarding through Arena winner selection and project memory reuse.
-- [ ] Add reusable starter projects for product discovery, research synthesis, technical design, and writing.
+- [ ] Bind the durable experiment/Arena projection into the interactive Arena launch and promotion controls.
 - [ ] Complete manual keyboard and screen-reader review for Arena and project flows.
 - [ ] Improve responsive behavior for smaller laptop and tablet layouts.
 
@@ -46,8 +51,8 @@ The current focus is making the product understandable, reliable, and evaluable 
 - [ ] Activity history for important project changes and promoted memory.
 - [ ] Comments or review notes attached to branches, artifacts, and Arena comparisons.
 - [ ] Import and export for portable sessions and projects.
-- [ ] Project templates and organization-level defaults.
-- [ ] Better model-cost and quota visibility before and after a run.
+- [ ] Project templates and organization-level defaults beyond the built-in starter maps.
+- [ ] Better model-cost and quota visibility before and after a run in the product UI.
 - [ ] Administrative controls for plans, usage, providers, and support workflows.
 - [ ] More detailed recovery flows for conflicting edits and interrupted model runs.
 
@@ -59,6 +64,7 @@ The current focus is making the product understandable, reliable, and evaluable 
 - [ ] Evaluation datasets for comparing models and prompt strategies inside Arena.
 - [ ] Optional organization knowledge sources with explicit permissions and provenance.
 - [ ] Deployment profiles beyond the current Vercel and Supabase reference architecture.
+- [ ] Provider-native continuation tokens where runtime semantics can be verified against Nodes' durable replay boundary.
 
 ## What is intentionally not promised
 
@@ -68,7 +74,8 @@ Nodes does not currently claim:
 - guaranteed compatibility with every model provider;
 - unlimited hosted inference funded by the deployment owner;
 - a stable `1.0` data format;
-- autonomous agents operating without explicit permissions and quotas.
+- autonomous agents operating without explicit permissions and quotas;
+- provider-native thread resumption when only Nodes-owned durable replay is available.
 
 ## How priorities are chosen
 

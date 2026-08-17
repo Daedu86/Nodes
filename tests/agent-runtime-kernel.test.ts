@@ -42,6 +42,9 @@ describe("agent runtime kernel", () => {
 
     expect(kernel.has(AGENT_KERNEL_CAPABILITIES.tools)).toBe(true);
     expect(kernel.has(AGENT_KERNEL_CAPABILITIES.sessionLogFactory)).toBe(true);
+    expect(kernel.has(AGENT_KERNEL_CAPABILITIES.requestAssembler)).toBe(true);
+    expect(kernel.has(AGENT_KERNEL_CAPABILITIES.policyResolver)).toBe(true);
+    expect(kernel.has(AGENT_KERNEL_CAPABILITIES.metricsCollector)).toBe(true);
     expect(result).toEqual({ runId: "run-1", prompt: "original + policy" });
     expect(startedPrompt).toBe("original + policy");
     expect(events).toEqual(["started"]);

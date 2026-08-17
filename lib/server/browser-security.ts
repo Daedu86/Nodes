@@ -44,7 +44,13 @@ export function createContentSecurityPolicy(
     throw new Error("A valid CSP nonce is required.");
   }
 
-  const scriptSources = ["'self'", `'nonce-${nonce}'`];
+  // Speed Insights is rendered by @vercel/speed-insights in preview/production.
+  // Keep the external script allow-list exact instead of weakening nonce policy.
+  const scriptSources = [
+    "'self'",
+    `'nonce-${nonce}'`,
+    "https://va.vercel-scripts.com",
+  ];
   if (!production) scriptSources.push("'unsafe-eval'");
 
   const directives = [

@@ -8,16 +8,116 @@ updates:
       day: monday
       time: "07:15"
       timezone: Europe/Berlin
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 12
     versioning-strategy: increase-if-necessary
     groups:
-      production-minor-patch:
+      assistant-ui:
         dependency-type: production
+        patterns:
+          - "@assistant-ui/*"
+          - "assistant-stream"
         update-types:
           - minor
           - patch
-      development-minor-patch:
+      ai-sdk:
+        dependency-type: production
+        patterns:
+          - "ai"
+          - "@ai-sdk/*"
+        update-types:
+          - minor
+          - patch
+      next-react:
+        dependency-type: production
+        patterns:
+          - "next"
+          - "react"
+          - "react-dom"
+          - "next-auth"
+        update-types:
+          - minor
+          - patch
+      supabase:
+        dependency-type: production
+        patterns:
+          - "@supabase/*"
+        update-types:
+          - minor
+          - patch
+      production-other:
+        dependency-type: production
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "@assistant-ui/*"
+          - "assistant-stream"
+          - "ai"
+          - "@ai-sdk/*"
+          - "next"
+          - "react"
+          - "react-dom"
+          - "next-auth"
+          - "@supabase/*"
+        update-types:
+          - minor
+          - patch
+      eslint-stack:
         dependency-type: development
+        patterns:
+          - "eslint"
+          - "eslint-config-next"
+          - "@eslint/*"
+          - "@typescript-eslint/*"
+        update-types:
+          - minor
+          - patch
+      testing:
+        dependency-type: development
+        patterns:
+          - "@playwright/*"
+          - "vitest"
+          - "@vitest/*"
+          - "@testing-library/*"
+          - "@axe-core/*"
+          - "jsdom"
+        update-types:
+          - minor
+          - patch
+      typescript-types:
+        dependency-type: development
+        patterns:
+          - "typescript"
+          - "@types/*"
+        update-types:
+          - minor
+          - patch
+      tailwind:
+        dependency-type: development
+        patterns:
+          - "tailwindcss"
+          - "@tailwindcss/*"
+        update-types:
+          - minor
+          - patch
+      development-other:
+        dependency-type: development
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "eslint"
+          - "eslint-config-next"
+          - "@eslint/*"
+          - "@typescript-eslint/*"
+          - "@playwright/*"
+          - "vitest"
+          - "@vitest/*"
+          - "@testing-library/*"
+          - "@axe-core/*"
+          - "jsdom"
+          - "typescript"
+          - "@types/*"
+          - "tailwindcss"
+          - "@tailwindcss/*"
         update-types:
           - minor
           - patch
@@ -33,6 +133,21 @@ updates:
       time: "07:30"
       timezone: Europe/Berlin
     open-pull-requests-limit: 5
+    groups:
+      codeql:
+        patterns:
+          - "github/codeql-action/*"
+        update-types:
+          - minor
+          - patch
+      github-actions-other:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "github/codeql-action/*"
+        update-types:
+          - minor
+          - patch
     commit-message:
       prefix: ci
       include: scope

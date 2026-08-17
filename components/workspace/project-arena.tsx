@@ -3,6 +3,7 @@
 import React from "react";
 import { ArrowUpRight, CopyPlus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ProjectArenaExperimentPanel } from "@/components/workspace/project-arena-experiment-panel";
 import type { ProjectArenaEntry, ProjectArenaEntryKind, ProjectArenaSummary } from "@/lib/project-arena";
 
 const formatUpdatedAt = (value: string) => {
@@ -181,6 +182,7 @@ export function ProjectArena({
           </div>
 
           <aside className="space-y-4">
+            <ProjectArenaExperimentPanel />
             <section className="rounded-3xl border border-border/60 bg-background/90 px-4 py-4 shadow-sm">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-violet-700" />
