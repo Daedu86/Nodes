@@ -22,22 +22,34 @@ describe("persisted resource client helpers", () => {
     expect(dedupeResourceIds(["a", "", "b", "a"])).toEqual(["a", "b"]);
   });
 
-  it("preserves a queued addition that committed after a stale render", () => {
+  it("replays a stale addition without dropping a later authoritative addition", () => {
     expect(
       reconcileQueuedResourceIds(
+        ["base-memory"],
         ["base-memory", "arena-memo"],
         ["base-memory", "arena-merge-node"],
       ),
     ).toEqual(["base-memory", "arena-memo", "arena-merge-node"]);
   });
 
-  it("keeps pure removals subtractive instead of turning the list append-only", () => {
+  it("replays a removal without dropping unrelated concurrent additions", () => {
     expect(
       reconcileQueuedResourceIds(
         ["base-memory", "arena-memo", "arena-merge-node"],
+        ["base-memory", "arena-memo", "arena-merge-node", "concurrent-memory"],
         ["base-memory", "arena-merge-node"],
       ),
-    ).toEqual(["base-memory", "arena-merge-node"]);
+    ).toEqual(["base-memory", "arena-merge-node", "concurrent-memory"]);
+  });
+
+  it("replays simultaneous add and remove intent over the latest list", () => {
+    expect(
+      reconcileQueuedResourceIds(
+        ["a", "b"],
+        ["a", "b", "c"],
+        ["b", "d"],
+      ),
+    ).toEqual(["b", "c", "d"]);
   });
 
   it("replaces known resources without changing list order", () => {
