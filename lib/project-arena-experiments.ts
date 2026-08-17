@@ -31,6 +31,13 @@ export type ProjectArenaExperimentSummary = {
   summary: string;
 };
 
+export type ProjectArenaPromotionResult = {
+  ready: boolean;
+  reason: string;
+  winner: ExperimentRunRecord | null;
+  records: ExperimentRunRecord[];
+};
+
 /**
  * Arena view over durable experiment records. The adapter deliberately keeps
  * Tycho's quality score visible beside cost and latency so promotion trade-offs
@@ -88,5 +95,60 @@ export function buildProjectArenaExperimentSummary(
     summary: lead
       ? `${lead.title} leads ${experimentId} with utility ${lead.utility!.toFixed(4)}, Tycho quality ${lead.qualityScore}, cost $${lead.costUsd}, and latency ${lead.latencyMs} ms.`
       : `${experimentId} has ${entries.length} candidates, but no candidate has complete quality/cost/latency evidence for promotion.`,
+  };
+}
+
+/**
+ * Produces an append-only promotion snapshot only when every candidate has
+ * complete terminal evidence. Tycho quality remains the dominant utility
+ * signal; cost and latency are explicit secondary trade-offs through the same
+ * ranking function used by Arena display.
+ */
+export function buildProjectArenaPromotion(
+  records: readonly ExperimentRunRecord[],
+  weights: ExperimentUtilityWeights = DEFAULT_EXPERIMENT_UTILITY_WEIGHTS,
+): ProjectArenaPromotionResult {
+  if (records.length < 2) {
+    return {
+      ready: false,
+      reason: "At least two candidates are required before Arena can promote a winner.",
+      winner: null,
+      records: records.map((record) => structuredClone(record)),
+    };
+  }
+
+  const experimentId = records[0]!.experimentId;
+  if (records.some((record) => record.experimentId !== experimentId)) {
+    throw new Error("Project Arena promotion requires one experimentId.");
+  }
+
+  const ranking = rankExperimentRuns(records, weights);
+  if (ranking.length !== records.length) {
+    return {
+      ready: false,
+      reason:
+        "Every candidate must be completed with Tycho quality, cost, and latency evidence before promotion.",
+      winner: null,
+      records: records.map((record) => structuredClone(record)),
+    };
+  }
+
+  const winner = ranking[0]!.record;
+  const winnerUtility = ranking[0]!.utility;
+  const promotionReason =
+    `Arena promoted ${winner.title} from ${experimentId}: utility ${winnerUtility.toFixed(4)}, ` +
+    `Tycho quality ${winner.metrics.qualityScore}, cost $${winner.metrics.costUsd}, ` +
+    `latency ${winner.metrics.latencyMs} ms.`;
+  const promotedRecords = records.map((record) => ({
+    ...structuredClone(record),
+    promotion: record.candidateId === winner.candidateId ? "champion" as const : "rejected" as const,
+    promotionReason,
+  }));
+
+  return {
+    ready: true,
+    reason: promotionReason,
+    winner: promotedRecords.find((record) => record.candidateId === winner.candidateId) ?? null,
+    records: promotedRecords,
   };
 }
