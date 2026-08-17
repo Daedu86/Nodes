@@ -390,7 +390,13 @@ test("keeps core Canvas interactions usable across selection, pan, zoom, and Cha
   const canvasModeButton = page.getByRole("button", { name: "Show canvas panel" });
   await canvasModeButton.click();
   await expect(canvasModeButton).toHaveAttribute("aria-pressed", "true");
-  await expect(composer).toBeHidden();
+  await expect
+    .poll(async () =>
+      composer.evaluate(
+        (element) => element.closest('[aria-hidden="true"][inert]') !== null,
+      ),
+    )
+    .toBe(true);
   await fitView.click();
   await expect(node).toBeVisible();
   await node.dblclick({ position: { x: 24, y: 24 } });
