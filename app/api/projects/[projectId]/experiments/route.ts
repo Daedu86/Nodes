@@ -1,5 +1,4 @@
 import { getAgentHandle } from "@/lib/agents/runtime/handle";
-import { markExperimentRunCancelled } from "@/lib/agent-experiments";
 import { getProjectForUser, ProjectAccessError } from "@/lib/project-collaboration";
 import {
   buildProjectArenaExperimentEntries,
@@ -123,7 +122,16 @@ export async function POST(req: Request, context: RouteParams) {
         ownerId: guarded.user.id,
         runId: record.runId,
       }).cancel();
-      const cancelled = markExperimentRunCancelled(record);
+      const cancelled = {
+        ...record,
+        status: "cancelled" as const,
+        completedAt: new Date().toISOString(),
+        promotion: record.promotion === "champion" ? record.promotion : ("undecided" as const),
+        promotionReason:
+          record.promotion === "champion"
+            ? record.promotionReason
+            : "Cancelled from the Arena experiment control plane.",
+      };
       await persistExperimentRun({ ownerId: guarded.user.id, record: cancelled });
 
       const records = projectRecords.map((candidate) =>
