@@ -129,28 +129,31 @@ export const dedupeResourceIds = (resourceIds: string[]) =>
   [...new Set(resourceIds)].filter((resourceId) => resourceId.length > 0);
 
 /**
- * Reconciles a queued list patch against the latest authoritative list.
+ * Replays the caller's list mutation intent over the latest authoritative list.
  *
- * UI callers often construct an addition from render-time state, while the
- * serialized request queue may already have committed another addition. If
- * the requested list contains at least one new id, treat it as an additive
- * mutation and preserve ids that are already authoritative. A patch with no
- * new ids remains a replacement so detach/delete operations can still remove
- * entries intentionally.
+ * A queued patch is usually built from render-time state. By the time it runs,
+ * another serialized request may already have added or removed ids. Comparing
+ * the requested list to the caller's base snapshot gives us an explicit delta:
+ * additions are added to the current list, removals are removed from the current
+ * list, and unrelated concurrent changes are preserved.
  */
 export function reconcileQueuedResourceIds(
+  baseResourceIds: string[],
   currentResourceIds: string[],
   requestedResourceIds: string[],
 ) {
+  const base = dedupeResourceIds(baseResourceIds);
   const current = dedupeResourceIds(currentResourceIds);
   const requested = dedupeResourceIds(requestedResourceIds);
-  const containsAddition = requested.some(
-    (resourceId) => !current.includes(resourceId),
+  const added = requested.filter((resourceId) => !base.includes(resourceId));
+  const removed = new Set(
+    base.filter((resourceId) => !requested.includes(resourceId)),
   );
 
-  return containsAddition
-    ? dedupeResourceIds([...current, ...requested])
-    : requested;
+  return dedupeResourceIds([
+    ...current.filter((resourceId) => !removed.has(resourceId)),
+    ...added,
+  ]);
 }
 
 export function replaceResourceById<T extends { id: string }>(
