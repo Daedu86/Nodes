@@ -6,6 +6,7 @@ import {
   fetchApi,
   fetchJson,
   readStoredResourceId,
+  reconcileQueuedResourceIds,
   writeStoredResourceId,
 } from "@/lib/client/persisted-resource-client";
 import {
@@ -270,11 +271,22 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 
   const saveActiveProjectPatch = React.useCallback((patch: ProjectUpdatePatch) => {
     const enqueue = async () => {
-      const projectId = activeProjectRef.current?.id;
+      const currentProject = activeProjectRef.current;
+      const projectId = currentProject?.id;
       if (!projectId) return null;
+      const effectivePatch =
+        currentProject && patch.memoryIds
+          ? {
+              ...patch,
+              memoryIds: reconcileQueuedResourceIds(
+                currentProject.memoryIds,
+                patch.memoryIds,
+              ),
+            }
+          : patch;
       const data = await fetchJson<ProjectResponse>(`/api/projects/${projectId}`, {
         method: "PATCH",
-        body: JSON.stringify(patch),
+        body: JSON.stringify(effectivePatch),
       });
       updateKnownProject(data.project);
       return data.project;
