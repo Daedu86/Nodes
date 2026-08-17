@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Activity, RefreshCw, Trophy } from "lucide-react";
+import { Activity, RefreshCw, Square, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useProjects } from "@/components/context/projects";
 import type { ProjectArenaExperimentEntry } from "@/lib/project-arena-experiments";
@@ -15,16 +15,33 @@ type ExperimentResponse = {
     candidateId: string;
     title: string;
   };
+  cancelled?: {
+    experimentId: string;
+    candidateId: string;
+    runId: string | null;
+  };
 };
 
 const metric = (value: number | null, suffix = "") =>
   value === null || !Number.isFinite(value) ? "—" : `${value}${suffix}`;
+
+const experimentPhase = (candidates: ProjectArenaExperimentEntry[]) => {
+  if (candidates.some((entry) => entry.promotion === "champion")) return "decided";
+  if (candidates.some((entry) => entry.status === "running")) return "running";
+  if (candidates.some((entry) => entry.status === "planned")) return "planned";
+  if (candidates.every((entry) => entry.status === "completed")) {
+    return candidates.every((entry) => entry.utility !== null) ? "ready to decide" : "evaluating";
+  }
+  if (candidates.every((entry) => ["failed", "cancelled"].includes(entry.status))) return "stopped";
+  return "partial";
+};
 
 export function ProjectArenaExperimentPanel() {
   const { activeProject } = useProjects();
   const [entries, setEntries] = React.useState<ProjectArenaExperimentEntry[]>([]);
   const [state, setState] = React.useState<"idle" | "loading" | "ready" | "error">("idle");
   const [promotingId, setPromotingId] = React.useState<string | null>(null);
+  const [controllingKey, setControllingKey] = React.useState<string | null>(null);
   const [controlMessage, setControlMessage] = React.useState<string | null>(null);
   const [controlError, setControlError] = React.useState<string | null>(null);
 
@@ -53,6 +70,12 @@ export function ProjectArenaExperimentPanel() {
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  React.useEffect(() => {
+    if (!entries.some((entry) => entry.status === "running")) return undefined;
+    const timer = window.setInterval(() => void load(), 5_000);
+    return () => window.clearInterval(timer);
+  }, [entries, load]);
 
   const experiments = React.useMemo(() => {
     const grouped = new Map<string, ProjectArenaExperimentEntry[]>();
@@ -95,7 +118,40 @@ export function ProjectArenaExperimentPanel() {
     }
   }, [activeProject]);
 
+  const cancelCandidate = React.useCallback(async (entry: ProjectArenaExperimentEntry) => {
+    if (!activeProject || activeProject.accessRole !== "owner") return;
+    setControllingKey(entry.key);
+    setControlError(null);
+    setControlMessage(null);
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(activeProject.id)}/experiments`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "cancel-candidate",
+            experimentId: entry.experimentId,
+            candidateId: entry.candidateId,
+          }),
+        },
+      );
+      const payload = (await response.json().catch(() => null)) as ExperimentResponse | null;
+      if (!response.ok) {
+        throw new Error(payload?.error || `Candidate cancellation failed (${response.status}).`);
+      }
+      setEntries(Array.isArray(payload?.entries) ? payload.entries : []);
+      setControlMessage(`${entry.title} was cancelled and its durable experiment state was updated.`);
+    } catch (error) {
+      setControlError(error instanceof Error ? error.message : "Candidate cancellation failed.");
+    } finally {
+      setControllingKey(null);
+    }
+  }, [activeProject]);
+
   if (!activeProject || activeProject.accessRole !== "owner") return null;
+
+  const controlBusy = promotingId !== null || controllingKey !== null;
 
   return (
     <section className="rounded-3xl border border-border/60 bg-background/90 px-4 py-4 shadow-sm">
@@ -105,7 +161,7 @@ export function ProjectArenaExperimentPanel() {
           <div>
             <p className="text-sm font-semibold text-foreground">Experimental runtime</p>
             <p className="text-xs text-muted-foreground">
-              Durable challengers with Tycho quality, cost, latency, and promotion evidence.
+              Durable challengers with live status, Tycho quality, cost, latency, cancellation, and promotion evidence.
             </p>
           </div>
         </div>
@@ -116,7 +172,7 @@ export function ProjectArenaExperimentPanel() {
           className="h-8 w-8"
           aria-label="Refresh experiment evidence"
           title="Refresh experiment evidence"
-          disabled={state === "loading" || promotingId !== null}
+          disabled={state === "loading" || controlBusy}
           onClick={() => void load()}
         >
           <RefreshCw className={`h-3.5 w-3.5 ${state === "loading" ? "animate-spin" : ""}`} />
@@ -159,12 +215,18 @@ export function ProjectArenaExperimentPanel() {
               (sum, entry) => sum + entry.inputTokens + entry.outputTokens,
               0,
             );
+            const phase = experimentPhase(candidates);
 
             return (
               <div key={experimentId} className="rounded-2xl border border-border/60 bg-muted/10 p-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs font-semibold text-foreground">{experimentId}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-xs font-semibold text-foreground">{experimentId}</p>
+                      <span className="rounded-full border border-border/60 bg-background/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                        {phase}
+                      </span>
+                    </div>
                     <p className="mt-1 text-[11px] text-muted-foreground">
                       {completed.length}/{candidates.length} completed · measured {fullyMeasured.length}/{candidates.length} · cost ${totalCost.toFixed(4)} · tokens {totalTokens}
                     </p>
@@ -174,7 +236,7 @@ export function ProjectArenaExperimentPanel() {
                     size="sm"
                     variant={hasChampion ? "outline" : "default"}
                     className="gap-1.5"
-                    disabled={!promotionReady || promotingId !== null}
+                    disabled={!promotionReady || controlBusy}
                     title={
                       hasChampion
                         ? "This experiment already has a promoted champion."
@@ -216,9 +278,24 @@ export function ProjectArenaExperimentPanel() {
                             {entry.candidateId} · {entry.status}
                           </p>
                         </div>
-                        <span className="text-xs font-semibold text-foreground">
-                          utility {entry.utility === null ? "—" : entry.utility.toFixed(3)}
-                        </span>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {entry.status === "running" && entry.runId ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 gap-1 px-2 text-[11px]"
+                              disabled={controlBusy}
+                              onClick={() => void cancelCandidate(entry)}
+                            >
+                              <Square className="h-3 w-3" />
+                              {controllingKey === entry.key ? "Cancelling…" : "Cancel"}
+                            </Button>
+                          ) : null}
+                          <span className="text-xs font-semibold text-foreground">
+                            utility {entry.utility === null ? "—" : entry.utility.toFixed(3)}
+                          </span>
+                        </div>
                       </div>
                       <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
                         <div><span className="text-muted-foreground">Tycho </span>{metric(entry.qualityScore)}</div>
