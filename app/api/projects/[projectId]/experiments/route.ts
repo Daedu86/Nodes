@@ -1,4 +1,10 @@
 import { getAgentHandle } from "@/lib/agents/runtime/handle";
+import type { AgentRuntimeId } from "@/lib/agents/runtime/types";
+import {
+  buildArenaExperimentPlan,
+  createExperimentRunRecord,
+  type ArenaExperimentChallenger,
+} from "@/lib/agent-experiments";
 import { getProjectForUser, ProjectAccessError } from "@/lib/project-collaboration";
 import {
   buildProjectArenaExperimentEntries,
@@ -18,9 +24,63 @@ type ExperimentControlRequest = {
   action?: unknown;
   experimentId?: unknown;
   candidateId?: unknown;
+  championRuntime?: unknown;
+  championRunId?: unknown;
+  challengers?: unknown;
+  runId?: unknown;
+  failureMessage?: unknown;
+};
+
+type ParsedChallenger = {
+  challenger: ArenaExperimentChallenger;
+  sandboxPolicyId: string | null;
 };
 
 export const runtime = "nodejs";
+
+const text = (value: unknown) =>
+  typeof value === "string" && value.trim() ? value.trim() : null;
+
+const runtimeId = (value: unknown): AgentRuntimeId | null =>
+  value === "codex" || value === "nooa" ? value : null;
+
+const parseChallengers = (
+  value: unknown,
+  projectId: string,
+): ParsedChallenger[] | null => {
+  if (!Array.isArray(value) || value.length < 2 || value.length > 8) return null;
+  const parsed: ParsedChallenger[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const record = raw as Record<string, unknown>;
+    const id = text(record.id);
+    const runtime = runtimeId(record.runtime);
+    const sessionId = text(record.sessionId);
+    const prompt = text(record.prompt);
+    if (!id || !runtime || !sessionId || !prompt) return null;
+    const sandboxPolicyId = text(record.sandboxPolicyId);
+    if (runtime === "nooa" && !sandboxPolicyId) return null;
+    parsed.push({
+      challenger: {
+        id,
+        title: text(record.title),
+        runtime,
+        sessionId,
+        projectId,
+        prompt,
+        model: text(record.model),
+        role: runtime === "nooa" ? "custom" : text(record.role) ?? "coder",
+        workspaceId: text(record.workspaceId),
+        metadata:
+          record.metadata && typeof record.metadata === "object" && !Array.isArray(record.metadata)
+            ? record.metadata as Record<string, unknown>
+            : undefined,
+      },
+      sandboxPolicyId,
+    });
+  }
+  return parsed;
+};
 
 async function requireOwnedProject(
   projectId: string,
@@ -69,24 +129,25 @@ export async function POST(req: Request, context: RouteParams) {
   if ("response" in guarded) return guarded.response;
   const { projectId } = await context.params;
   const body = (await req.json().catch(() => null)) as ExperimentControlRequest | null;
-  const action = typeof body?.action === "string" ? body.action.trim() : "";
-  const experimentId =
-    typeof body?.experimentId === "string" ? body.experimentId.trim() : "";
-  const candidateId =
-    typeof body?.candidateId === "string" ? body.candidateId.trim() : "";
+  const action = text(body?.action) ?? "";
+  const experimentId = text(body?.experimentId) ?? "";
+  const candidateId = text(body?.candidateId) ?? "";
 
-  if (!experimentId || !["promote-best", "cancel-candidate"].includes(action)) {
+  if (
+    !experimentId ||
+    ![
+      "plan-challengers",
+      "bind-candidate",
+      "fail-candidate",
+      "cancel-candidate",
+      "promote-best",
+    ].includes(action)
+  ) {
     return Response.json(
       {
         error:
-          "Expected action 'promote-best' or 'cancel-candidate' and a non-empty experimentId.",
+          "Expected a supported experiment control action and a non-empty experimentId.",
       },
-      { status: 400 },
-    );
-  }
-  if (action === "cancel-candidate" && !candidateId) {
-    return Response.json(
-      { error: "cancel-candidate requires a non-empty candidateId." },
       { status: 400 },
     );
   }
@@ -97,6 +158,64 @@ export async function POST(req: Request, context: RouteParams) {
       ownerId: guarded.user.id,
       projectId,
     });
+
+    if (action === "plan-challengers") {
+      const championRuntime = runtimeId(body?.championRuntime);
+      const championRunId = text(body?.championRunId);
+      const parsedChallengers = parseChallengers(body?.challengers, projectId);
+      if (!championRuntime || !championRunId || !parsedChallengers) {
+        return Response.json(
+          {
+            error:
+              "Planning requires championRuntime, championRunId, and 2-8 valid challengers. NOOA challengers require sandboxPolicyId.",
+          },
+          { status: 400 },
+        );
+      }
+      if (projectRecords.some((record) => record.experimentId === experimentId)) {
+        return Response.json(
+          { error: "Experiment id already exists for this project." },
+          { status: 409 },
+        );
+      }
+
+      const champion = getAgentHandle(championRuntime, {
+        ownerId: guarded.user.id,
+        runId: championRunId,
+      });
+      const plan = buildArenaExperimentPlan({
+        experimentId,
+        champion,
+        challengers: parsedChallengers.map(({ challenger }) => challenger),
+      });
+      for (const candidate of plan.candidates) {
+        const parsed = parsedChallengers.find(
+          ({ challenger }) => challenger.id === candidate.id,
+        );
+        if (candidate.run.runtime === "nooa" && parsed?.sandboxPolicyId) {
+          candidate.run.sandbox = {
+            provider: "openshell",
+            policyId: parsed.sandboxPolicyId,
+          };
+        }
+      }
+      const plannedRecords = plan.candidates.map((candidate) =>
+        createExperimentRunRecord({ plan, candidate }),
+      );
+      for (const record of plannedRecords) {
+        await persistExperimentRun({ ownerId: guarded.user.id, record });
+      }
+      const records = [...projectRecords, ...plannedRecords];
+      return Response.json(
+        {
+          plan,
+          records,
+          entries: buildProjectArenaExperimentEntries(records),
+        },
+        { status: 201 },
+      );
+    }
+
     const experimentRecords = projectRecords.filter(
       (record) => record.experimentId === experimentId,
     );
@@ -104,7 +223,66 @@ export async function POST(req: Request, context: RouteParams) {
       return Response.json({ error: "Experiment not found." }, { status: 404 });
     }
 
+    if (action === "bind-candidate" || action === "fail-candidate") {
+      if (!candidateId) {
+        return Response.json({ error: `${action} requires candidateId.` }, { status: 400 });
+      }
+      const record = experimentRecords.find(
+        (candidate) => candidate.candidateId === candidateId,
+      );
+      if (!record) {
+        return Response.json({ error: "Experiment candidate not found." }, { status: 404 });
+      }
+      if (record.status !== "planned" && record.status !== "queued") {
+        return Response.json(
+          { error: `Candidate cannot transition from ${record.status} via ${action}.` },
+          { status: 409 },
+        );
+      }
+
+      const now = new Date().toISOString();
+      const next = action === "bind-candidate"
+        ? {
+            ...record,
+            runId: text(body?.runId),
+            status: "running" as const,
+            startedAt: record.startedAt ?? now,
+            completedAt: null,
+          }
+        : {
+            ...record,
+            status: "failed" as const,
+            completedAt: now,
+            promotionReason: text(body?.failureMessage)
+              ? `Launch failed: ${text(body?.failureMessage)}`
+              : "Launch failed before a runtime run was bound.",
+          };
+      if (action === "bind-candidate" && !next.runId) {
+        return Response.json(
+          { error: "bind-candidate requires a non-empty runId." },
+          { status: 400 },
+        );
+      }
+      await persistExperimentRun({ ownerId: guarded.user.id, record: next });
+      const records = projectRecords.map((candidate) =>
+        candidate.experimentId === experimentId && candidate.candidateId === candidateId
+          ? next
+          : candidate,
+      );
+      return Response.json({
+        record: next,
+        records,
+        entries: buildProjectArenaExperimentEntries(records),
+      });
+    }
+
     if (action === "cancel-candidate") {
+      if (!candidateId) {
+        return Response.json(
+          { error: "cancel-candidate requires a non-empty candidateId." },
+          { status: 400 },
+        );
+      }
       const record = experimentRecords.find(
         (candidate) => candidate.candidateId === candidateId,
       );
