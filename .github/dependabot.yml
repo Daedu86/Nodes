@@ -121,6 +121,12 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # ESLint 10 currently breaks the installed React lint plugin stack.
+      # Keep minor/patch security maintenance flowing until the ecosystem is compatible.
+      - dependency-name: eslint
+        update-types:
+          - version-update:semver-major
     commit-message:
       prefix: deps
       include: scope
