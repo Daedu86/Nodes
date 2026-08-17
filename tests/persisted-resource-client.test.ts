@@ -3,6 +3,7 @@ import {
   buildActiveResourceStorageKey,
   dedupeResourceIds,
   prependUniqueResource,
+  reconcileQueuedResourceIds,
   removeResourceById,
   replaceResourceById,
 } from "@/lib/client/persisted-resource-client";
@@ -19,6 +20,24 @@ describe("persisted resource client helpers", () => {
 
   it("deduplicates and removes empty resource ids", () => {
     expect(dedupeResourceIds(["a", "", "b", "a"])).toEqual(["a", "b"]);
+  });
+
+  it("preserves a queued addition that committed after a stale render", () => {
+    expect(
+      reconcileQueuedResourceIds(
+        ["base-memory", "arena-memo"],
+        ["base-memory", "arena-merge-node"],
+      ),
+    ).toEqual(["base-memory", "arena-memo", "arena-merge-node"]);
+  });
+
+  it("keeps pure removals subtractive instead of turning the list append-only", () => {
+    expect(
+      reconcileQueuedResourceIds(
+        ["base-memory", "arena-memo", "arena-merge-node"],
+        ["base-memory", "arena-merge-node"],
+      ),
+    ).toEqual(["base-memory", "arena-merge-node"]);
   });
 
   it("replaces known resources without changing list order", () => {
